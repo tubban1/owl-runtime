@@ -39,6 +39,7 @@ const html = `<!doctype html>
   <h1 id="status">Orders ready</h1>
   <div id="order-count" data-count="127">127 orders</div>
   <input id="report-name" placeholder="Report name">
+  <input id="attachment" type="file">
   <button id="generate" onclick="document.querySelector('#status').textContent='Report generated'; document.querySelector('#result').textContent='sales-report.csv';">Generate report</button>
   <div id="result"></div>
 </body>
@@ -54,8 +55,12 @@ await new Promise<void>((resolve, reject) => {
   server.listen(0, "127.0.0.1", () => resolve());
 });
 const address = server.address();
-if (!address || typeof address === "string") throw new Error("Fixture server has no TCP address.");
+if (!address || typeof address === "string") {
+  throw new Error("Fixture server has no TCP address.");
+}
 const url = `http://127.0.0.1:${address.port}/`;
+const uploadPath = path.join(scratch, "report-source.txt");
+await fs.writeFile(uploadPath, "fixture upload", "utf8");
 
 try {
   const task = await createPersistentTask(
@@ -67,6 +72,15 @@ try {
         args: { url, wait_until: "domcontentloaded", headless: true },
       },
       {
+        id: "upload",
+        action: "browser.upload",
+        args: {
+          selector: "#attachment",
+          files: [uploadPath],
+        },
+        dependsOn: ["open"],
+      },
+      {
         id: "name",
         action: "browser.type",
         args: {
@@ -74,7 +88,7 @@ try {
           text: "Daily Sales Report",
           submit: false,
         },
-        dependsOn: ["open"],
+        dependsOn: ["upload"],
       },
       {
         id: "generate",
@@ -83,7 +97,8 @@ try {
         dependsOn: ["name"],
         verify: {
           id: "report-generated",
-          description: "The report action must visibly finish and expose the generated filename.",
+          description:
+            "The report action must visibly finish and expose the generated filename.",
           expectations: [
             {
               path: "data.text",
@@ -114,7 +129,18 @@ try {
   assert.equal(run.status, "completed");
 
   const status = await getPersistentTaskStatus(task.id, true);
+  const upload = status.steps.find((step) => step.id === "upload");
+  const typed = status.steps.find((step) => step.id === "name");
   const generated = status.steps.find((step) => step.id === "generate");
+
+  assert.equal(upload?.state, "succeeded");
+  assert.equal(upload?.verification?.status, "verified");
+  assert.equal(upload?.verification?.specId, "default:browser.upload");
+
+  assert.equal(typed?.state, "succeeded");
+  assert.equal(typed?.verification?.status, "verified");
+  assert.equal(typed?.verification?.specId, "default:browser.type");
+
   assert.equal(generated?.state, "succeeded");
   assert.equal(generated?.observation?.channel, "web");
   assert.equal(generated?.observation?.provider, "browser");
@@ -127,10 +153,93 @@ try {
     ),
   );
 
+  const uncertainTask = await createPersistentTask(
+    "generic click requires semantic verification",
+    [
+      {
+        id: "open",
+        action: "browser.open",
+        args: { url, wait_until: "domcontentloaded", headless: true },
+      },
+      {
+        id: "click",
+        action: "browser.click",
+        args: { selector: "#generate" },
+        dependsOn: ["open"],
+      },
+    ],
+    { maxConcurrency: 1, failFast: true },
+  );
+
+  const uncertainRun = await runPersistentTask(uncertainTask.id, {
+    maxConcurrency: 1,
+    maxWaves: 10,
+    timeBudgetMs: 60_000,
+  });
+  assert.equal(uncertainRun.status, "blocked");
+
+  const uncertainStatus = await getPersistentTaskStatus(
+    uncertainTask.id,
+    true,
+  );
+  const uncertainClick = uncertainStatus.steps.find(
+    (step) => step.id === "click",
+  );
+  assert.equal(uncertainClick?.state, "needs_review");
+  assert.equal(uncertainClick?.verification?.status, "uncertain");
+  assert.equal(
+    uncertainClick?.verification?.specId,
+    "default:browser.click",
+  );
+
+  const submitTask = await createPersistentTask(
+    "submit typing requires semantic verification",
+    [
+      {
+        id: "open",
+        action: "browser.open",
+        args: { url, wait_until: "domcontentloaded", headless: true },
+      },
+      {
+        id: "submit",
+        action: "browser.type",
+        args: {
+          selector: "#report-name",
+          text: "Submitted Report",
+          submit: true,
+        },
+        dependsOn: ["open"],
+      },
+    ],
+    { maxConcurrency: 1, failFast: true },
+  );
+
+  const submitRun = await runPersistentTask(submitTask.id, {
+    maxConcurrency: 1,
+    maxWaves: 10,
+    timeBudgetMs: 60_000,
+  });
+  assert.equal(submitRun.status, "blocked");
+
+  const submitStatus = await getPersistentTaskStatus(submitTask.id, true);
+  const submitted = submitStatus.steps.find(
+    (step) => step.id === "submit",
+  );
+  assert.equal(submitted?.state, "needs_review");
+  assert.equal(submitted?.verification?.status, "uncertain");
+  assert.equal(
+    submitted?.verification?.specId,
+    "default:browser.type",
+  );
+
   console.log(JSON.stringify({
     ok: true,
     browserObservation: true,
-    explicitPostconditions: true,
+    defaultTypePostcondition: true,
+    defaultUploadPostcondition: true,
+    explicitClickPostcondition: true,
+    genericClickFailsClosedAsUncertain: true,
+    submitTypeFailsClosedAsUncertain: true,
     persistentTaskCompleted: true,
     verificationStatus: generated?.verification?.status,
     fixture: {

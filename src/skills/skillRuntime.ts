@@ -3519,6 +3519,8 @@ export async function getCapabilityManifest(goal = "") {
       },
       observationAbi: getObservationAbiManifest(),
       verifierAbi: getVerifierAbiManifest(),
+      providerPostconditions:
+        "v1: deterministic when machine-verifiable; otherwise explicit uncertain/review",
       executionTarget: getExecutionTargetManifest(),
       managedProcessStateMachine: "v1 candidate: observe/wait/interact with durable-record compatibility",
       approvalPolicy: getApprovalPolicyStatus(),

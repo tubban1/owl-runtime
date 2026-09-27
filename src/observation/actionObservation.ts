@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { browserProvider } from "../providers/browserProvider.js";
 import { desktopProvider } from "../providers/desktopProvider.js";
 import { getFileInfo } from "../tools/fileOps.js";
@@ -8,9 +9,11 @@ import {
   type ObservationEvidence,
 } from "./observationAbi.js";
 import {
+  uncertainVerificationReceipt,
   verifyObservation,
   type VerificationExpectation,
   type VerificationReceipt,
+  type VerificationSpec,
 } from "../verification/verifier.js";
 
 type JsonObject = Record<string, unknown>;
@@ -25,6 +28,10 @@ function stringField(value: unknown, key: string): string | undefined {
   const object = asObject(value);
   const field = object?.[key];
   return typeof field === "string" && field ? field : undefined;
+}
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function evidenceForResult(
@@ -118,19 +125,129 @@ async function observeBatchEdit(args: JsonObject): Promise<Observation | null> {
   });
 }
 
-async function observeBrowserAfterMutation(): Promise<Observation> {
-  const snapshot = await browserProvider.snapshot(30_000);
-  return createObservation({
-    channel: "web",
-    provider: "browser",
-    subject: snapshot.url,
-    state: "ready",
-    data: snapshot,
-    evidence: [
-      { kind: "text", summary: snapshot.text.slice(0, 500) },
-      { kind: "structured", metadata: { controls: snapshot.controls.length, links: snapshot.links.length } },
-    ],
-  });
+async function observeBrowserAfterMutation(
+  action: string,
+  args: JsonObject,
+): Promise<Observation> {
+  try {
+    const snapshot = await browserProvider.snapshot(30_000);
+    const selector = stringField(args, "selector");
+    const target =
+      selector && ["browser.type", "browser.upload"].includes(action)
+        ? await browserProvider.controlState(selector)
+        : undefined;
+
+    return createObservation({
+      channel: "web",
+      provider: "browser",
+      subject: snapshot.url,
+      state: "ready",
+      data: {
+        ...snapshot,
+        ...(target ? { target } : {}),
+      },
+      evidence: [
+        { kind: "text", summary: snapshot.text.slice(0, 500) },
+        {
+          kind: "structured",
+          metadata: {
+            controls: snapshot.controls.length,
+            links: snapshot.links.length,
+            ...(target
+              ? {
+                  targetExists: target.exists,
+                  targetCount: target.count,
+                }
+              : {}),
+          },
+        },
+      ],
+    });
+  } catch (error) {
+    return createObservation({
+      channel: "web",
+      provider: "browser",
+      state: "unknown",
+      data: {
+        action,
+        observationError:
+          error instanceof Error ? error.message : String(error),
+      },
+      evidence: [
+        {
+          kind: "system",
+          summary:
+            "The browser action returned, but post-action observation failed; side effects must be treated as uncertain.",
+        },
+      ],
+    });
+  }
+}
+
+async function observeDesktopAfterMutation(
+  action: string,
+): Promise<Observation> {
+  try {
+    if (action === "desktop.clipboard_write") {
+      const clipboard = await desktopProvider.clipboardRead();
+      const text =
+        clipboard &&
+        typeof clipboard === "object" &&
+        typeof (clipboard as JsonObject).text === "string"
+          ? ((clipboard as JsonObject).text as string)
+          : "";
+      return createObservation({
+        channel: "ui",
+        provider: "desktop",
+        state: "ready",
+        data: {
+          clipboard: {
+            characters: text.length,
+            sha256: sha256Text(text),
+          },
+        },
+        evidence: [
+          {
+            kind: "structured",
+            metadata: {
+              clipboardCharacters: text.length,
+            },
+          },
+        ],
+      });
+    }
+
+    const frontmost = await desktopProvider.frontmostApp();
+    return createObservation({
+      channel: "ui",
+      provider: "desktop",
+      subject: stringField(frontmost, "app"),
+      state: "ready",
+      data: {
+        action,
+        frontmost,
+      },
+      evidence: [{ kind: "system" }],
+    });
+  } catch (error) {
+    return createObservation({
+      channel: "ui",
+      provider: "desktop",
+      state: "unknown",
+      data: {
+        action,
+        observationError:
+          error instanceof Error ? error.message : String(error),
+      },
+      evidence: [
+        {
+          kind: "system",
+          summary:
+            "The desktop action returned, but deterministic post-action observation was unavailable; side effects must be treated as uncertain.",
+        },
+      ],
+    });
+  }
 }
 
 export async function observeRoutedActionOutcome(
@@ -179,7 +296,7 @@ export async function observeRoutedActionOutcome(
   }
 
   if (["browser.click", "browser.type", "browser.upload"].includes(action)) {
-    return await observeBrowserAfterMutation();
+    return await observeBrowserAfterMutation(action, args);
   }
   if (
     [
@@ -223,6 +340,18 @@ export async function observeRoutedActionOutcome(
       evidence: [{ kind: "system" }],
     });
   }
+  if (
+    [
+      "desktop.click",
+      "desktop.type",
+      "desktop.key",
+      "desktop.click_element",
+      "desktop.clipboard_write",
+    ].includes(action)
+  ) {
+    return await observeDesktopAfterMutation(action);
+  }
+
   if (action === "desktop.open_app") {
     const frontmost = await desktopProvider.frontmostApp();
     return createObservation({
@@ -283,6 +412,7 @@ export async function observeRoutedActionOutcome(
 
 export function defaultVerificationForAction(
   action: string,
+  args: JsonObject,
   result: unknown,
   observation: Observation | null,
 ): VerificationReceipt | null {
@@ -325,6 +455,128 @@ export function defaultVerificationForAction(
       id: "default:fs.batch_edit",
       expectations: [{ path: "data.files", operator: "exists" }],
     });
+  }
+
+  if (action === "browser.type") {
+    const spec: VerificationSpec = {
+      id: "default:browser.type",
+      description:
+        "Verify that the targeted control contains exactly the requested value without persisting the raw typed text.",
+      expectations: [
+        {
+          path: "data.target.exists",
+          operator: "equals",
+          expected: true,
+        },
+      ],
+    };
+
+    if (args.submit === true) {
+      return uncertainVerificationReceipt(
+        spec,
+        "Typing followed by Enter can navigate, submit, or replace the target control; a semantic postcondition is required.",
+        observation,
+      );
+    }
+
+    const text = stringField(args, "text") ?? "";
+    spec.expectations.push({
+      path: "data.target.valueSha256",
+      operator: "equals",
+      expected: sha256Text(text),
+    });
+    spec.expectations.push({
+      path: "data.target.valueLength",
+      operator: "equals",
+      expected: text.length,
+    });
+    return verifyObservation(observation, spec);
+  }
+
+  if (action === "browser.upload") {
+    const files = Array.isArray(args.files) ? args.files : [];
+    return verifyObservation(observation, {
+      id: "default:browser.upload",
+      description:
+        "Verify the browser file input holds the requested number of files without exposing file paths.",
+      expectations: [
+        {
+          path: "data.target.exists",
+          operator: "equals",
+          expected: true,
+        },
+        {
+          path: "data.target.fileCount",
+          operator: "equals",
+          expected: files.length,
+        },
+      ],
+    });
+  }
+
+  if (action === "browser.click") {
+    return uncertainVerificationReceipt(
+      {
+        id: "default:browser.click",
+        description:
+          "A generic click has no universal business-success postcondition.",
+        expectations: [
+          {
+            path: "data",
+            operator: "exists",
+          },
+        ],
+      },
+      "The click executed and the page was re-observed, but Runtime cannot infer the intended business outcome. Supply an explicit verification spec.",
+      observation,
+    );
+  }
+
+  if (action === "desktop.clipboard_write") {
+    const text =
+      typeof args.text === "string" ? args.text : "";
+    return verifyObservation(observation, {
+      id: "default:desktop.clipboard_write",
+      description:
+        "Verify the clipboard contains exactly the requested text without persisting the raw clipboard content.",
+      expectations: [
+        {
+          path: "data.clipboard.characters",
+          operator: "equals",
+          expected: text.length,
+        },
+        {
+          path: "data.clipboard.sha256",
+          operator: "equals",
+          expected: sha256Text(text),
+        },
+      ],
+    });
+  }
+
+  if (
+    [
+      "desktop.click",
+      "desktop.type",
+      "desktop.key",
+      "desktop.click_element",
+    ].includes(action)
+  ) {
+    return uncertainVerificationReceipt(
+      {
+        id: `default:${action}`,
+        description:
+          "Generic desktop input has no universal semantic postcondition.",
+        expectations: [
+          {
+            path: "data",
+            operator: "exists",
+          },
+        ],
+      },
+      "The desktop input action returned and Runtime attempted to re-observe the UI, but the intended application outcome cannot be inferred generically. Supply an explicit verification spec.",
+      observation,
+    );
   }
 
   return null;

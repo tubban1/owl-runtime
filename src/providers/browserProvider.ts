@@ -4,6 +4,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import net from "node:net";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chromium,
   type Browser,
@@ -16,6 +17,11 @@ import {
   assertAllowedTargetPath,
 } from "../security/pathGuard.js";
 import type { ComputerProvider, ProviderStatus } from "./types.js";
+import {
+  currentCancellationSignal,
+  OperationCancelledError,
+  throwIfCancelled,
+} from "../runtime/cancellation.js";
 
 const browserPaths = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -124,6 +130,42 @@ function runningUnderRosetta(): boolean {
 function requireBrowserEnabled(): void {
   if (!envFlag("ALLOW_BROWSER", false)) {
     throw new Error("Browser provider is disabled. Set ALLOW_BROWSER=true and restart computer-mcp.");
+  }
+}
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+async function withBrowserCancellation<T>(
+  page: Page,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const signal = currentCancellationSignal();
+  throwIfCancelled(signal);
+  if (!signal) return await operation();
+
+  let abortListener: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abortListener = () => {
+      void page
+        .close({ runBeforeUnload: false })
+        .catch(() => undefined)
+        .finally(() => {
+          reject(new OperationCancelledError(signal.reason));
+        });
+    };
+    signal.addEventListener("abort", abortListener, { once: true });
+  });
+
+  try {
+    const result = await Promise.race([operation(), cancelled]);
+    throwIfCancelled(signal);
+    return result;
+  } finally {
+    if (abortListener) {
+      signal.removeEventListener("abort", abortListener);
+    }
   }
 }
 
@@ -270,7 +312,9 @@ class BrowserProvider implements ComputerProvider {
       await this.ensureContext(headless);
     }
     const page = await this.page();
-    await page.goto(url, { waitUntil, timeout: 60_000 });
+    await withBrowserCancellation(page, async () => {
+      await page.goto(url, { waitUntil, timeout: 60_000 });
+    });
     return { url: page.url(), title: await page.title() };
   }
 
@@ -305,7 +349,9 @@ class BrowserProvider implements ComputerProvider {
     const page = await context.newPage();
     this.activePage = page;
     if (url) {
-      await page.goto(url, { waitUntil, timeout: 60_000 });
+      await withBrowserCancellation(page, async () => {
+        await page.goto(url, { waitUntil, timeout: 60_000 });
+      });
     }
     const pages = context.pages();
     return {
@@ -435,18 +481,76 @@ class BrowserProvider implements ComputerProvider {
   async click(selector: string) {
     const page = await this.page();
     const locator = page.locator(selector).first();
-    await locator.click({ timeout: 30_000 });
+    await withBrowserCancellation(page, async () => {
+      await locator.click({ timeout: 30_000 });
+    });
     return { url: page.url(), title: await page.title(), selector };
   }
 
   async type(selector: string, text: string, submit = false) {
     const page = await this.page();
     const locator = page.locator(selector).first();
-    await locator.fill(text, { timeout: 30_000 });
-    if (submit) await locator.press("Enter");
-    return { url: page.url(), title: await page.title(), selector, submitted: submit };
+    await withBrowserCancellation(page, async () => {
+      await locator.fill(text, { timeout: 30_000 });
+      if (submit) await locator.press("Enter");
+    });
+    return {
+      url: page.url(),
+      title: await page.title(),
+      selector,
+      submitted: submit,
+    };
   }
 
+
+  async controlState(selector: string) {
+    const page = await this.page();
+    const locator = page.locator(selector);
+    const count = await locator.count();
+    if (count === 0) {
+      return {
+        selector,
+        count: 0,
+        exists: false,
+        url: page.url(),
+      };
+    }
+
+    const first = locator.first();
+    const metadata = (await first.evaluate((element) => {
+      const input =
+        element instanceof HTMLInputElement ? element : null;
+      return {
+        tag: element.tagName.toLowerCase(),
+        type: element.getAttribute("type"),
+        checked: input?.checked ?? null,
+        fileCount: input?.files?.length ?? null,
+      };
+    })) as {
+      tag: string;
+      type: string | null;
+      checked: boolean | null;
+      fileCount: number | null;
+    };
+
+    const value = await first
+      .inputValue({ timeout: 5_000 })
+      .catch(() => null);
+
+    return {
+      selector,
+      count,
+      exists: true,
+      url: page.url(),
+      tag: metadata.tag,
+      type: metadata.type,
+      checked: metadata.checked,
+      fileCount: metadata.fileCount,
+      valueLength: typeof value === "string" ? value.length : null,
+      valueSha256:
+        typeof value === "string" ? sha256Text(value) : null,
+    };
+  }
 
   async find(query: string, maxResults = 20) {
     const page = await this.page();
@@ -519,14 +623,16 @@ class BrowserProvider implements ComputerProvider {
 
   async upload(selector: string, files: string[]) {
     if (!files.length) throw new Error("At least one upload file is required.");
-    const safeFiles = [];
+    const safeFiles: string[] = [];
     for (const file of files) {
       safeFiles.push(await assertAllowedExistingPath(file));
     }
 
     const page = await this.page();
     const locator = page.locator(selector).first();
-    await locator.setInputFiles(safeFiles, { timeout: 30_000 });
+    await withBrowserCancellation(page, async () => {
+      await locator.setInputFiles(safeFiles, { timeout: 30_000 });
+    });
     return {
       selector,
       files: safeFiles,

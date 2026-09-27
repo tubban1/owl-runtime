@@ -1020,6 +1020,7 @@ function createServer() {
       publicRuntimeApiV01: true,
       executionTargetContract: true,
       diagnosticSupportPackage: true,
+      providerPostconditionsV1: true,
           skillRuntime: true,
           skillAbi: true,
           resourceArbiter: true,

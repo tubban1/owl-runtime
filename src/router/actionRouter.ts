@@ -876,6 +876,7 @@ export async function executeRoutedAction(
   );
   const verification = defaultVerificationForAction(
     action,
+    parsed as JsonObject,
     executed.result,
     observation,
   );

@@ -31,6 +31,7 @@ Contracts intended to remain stable across implementations.
 - [Observation ABI](specifications/observation-abi.md)
 - [Verifier ABI](specifications/verifier-abi.md)
 - [ExecutionTarget and Provider Affinity](specifications/execution-target.md)
+- [Provider Postconditions](specifications/provider-postconditions.md)
 - [Skill ABI](specifications/skill-abi.md)
 - [Embedding Provider Contract](specifications/embedding-provider.md)
 - [Session Adapter Contract](specifications/session-adapter.md)
