@@ -43,30 +43,68 @@ assert.equal(legacyExited.terminal, true);
 
 const childScript =
   "process.stdout.write('READY> ');" +
-  "process.stdin.once('data', d => { console.log('GOT:' + d.toString().trim()); process.exit(0); });";
+  "process.stdin.once('data', first => {" +
+  " console.log('GOT1:' + first.toString().trim());" +
+  " process.stdout.write('NEXT> ');" +
+  " process.stdin.once('data', second => {" +
+  "  console.log('GOT2:' + second.toString().trim());" +
+  "  process.exit(0);" +
+  " });" +
+  "});";
 const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(childScript)}`;
-const started = await startProcess(command, root, "read");
+const processIds: string[] = [];
 
-const waiting = await waitForProcessState(started.processId, {
-  states: ["waiting_input"],
-  timeoutMs: 10_000,
-  pollMs: 100,
-});
-assert.equal(waiting.matched, true);
-assert.equal(waiting.observation.state, "waiting_input");
-assert.equal((waiting.observation.data as any).terminal, false);
+for (let round = 1; round <= 5; round += 1) {
+  const started = await startProcess(command, root, "read");
+  processIds.push(started.processId);
 
-const interaction = await interactWithManagedProcess(started.processId, "hello\n", {
-  timeoutMs: 10_000,
-  pollMs: 100,
-});
-assert.equal(interaction.matched, true);
-assert.equal(interaction.observation.state, "finished");
-assert.match((interaction.observation.data as any).stdout, /GOT:hello/);
+  const waiting = await waitForProcessState(started.processId, {
+    states: ["waiting_input"],
+    timeoutMs: 10_000,
+    pollMs: 100,
+  });
+  assert.equal(waiting.matched, true);
+  assert.equal(waiting.observation.state, "waiting_input");
+  assert.equal((waiting.observation.data as any).terminal, false);
 
-const finalObservation = await observeProcess(started.processId);
-assert.equal(finalObservation.state, "finished");
-assert.equal((finalObservation.data as any).exitCode, 0);
+  const firstInteraction = await interactWithManagedProcess(
+    started.processId,
+    `hello-${round}\n`,
+    {
+      timeoutMs: 10_000,
+      pollMs: 100,
+    },
+  );
+  assert.equal(firstInteraction.matched, true);
+  assert.equal(firstInteraction.observation.state, "waiting_input");
+  assert.match(
+    (firstInteraction.observation.data as any).stdout,
+    new RegExp(`GOT1:hello-${round}`),
+  );
+  assert.match(
+    (firstInteraction.observation.data as any).stdout,
+    /NEXT> /,
+  );
+
+  const secondInteraction = await interactWithManagedProcess(
+    started.processId,
+    `bye-${round}\n`,
+    {
+      timeoutMs: 10_000,
+      pollMs: 100,
+    },
+  );
+  assert.equal(secondInteraction.matched, true);
+  assert.equal(secondInteraction.observation.state, "finished");
+  assert.match(
+    (secondInteraction.observation.data as any).stdout,
+    new RegExp(`GOT2:bye-${round}`),
+  );
+
+  const finalObservation = await observeProcess(started.processId);
+  assert.equal(finalObservation.state, "finished");
+  assert.equal((finalObservation.data as any).exitCode, 0);
+}
 
 const manifest = getProcessStateMachineManifest();
 assert.ok(manifest.states.includes("waiting_input"));
@@ -79,7 +117,10 @@ console.log(JSON.stringify({
   terminalExitDetection: true,
   legacyRecordCompatibility: true,
   observationAbiIntegration: true,
-  processId: started.processId,
+  stalePromptRaceCovered: true,
+  exitReconciliationRaceCovered: true,
+  rounds: processIds.length,
+  processIds,
 }, null, 2));
 
 await fs.rm(scratch, { recursive: true, force: true });

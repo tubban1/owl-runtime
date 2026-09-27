@@ -36,6 +36,14 @@ The existing `runtime.process` Skill now supports:
 
 `waiting_network` remains reserved in Observation ABI for providers that can supply reliable network-wait evidence; the shell runtime does not guess it from silence.
 
+## Interaction freshness and exit reconciliation
+
+`runtime.process interact` must not treat the same pre-existing prompt as proof that a newly submitted input completed. Runtime snapshots stdout/stderr before writing stdin and accepts `waiting_input` only after output has changed and a new prompt is observed. Terminal states (`finished`, `failed`, `lost`) may complete the interaction immediately.
+
+For children started by the current Runtime instance, the live `ChildProcess` lifecycle is authoritative during the narrow OS-exit / durable-record-update window. Runtime must not classify such a child as `lost` merely because a PID probe turns false before the asynchronous exit handler persists `exited`. Before declaring a process lost, Runtime also re-reads the durable record to avoid overwriting a concurrent exit update.
+
+The conformance verifier exercises a two-turn interaction (`READY>` → `NEXT>` → exit) repeatedly so stale-prompt and false-`lost` races remain regression-tested.
+
 ## Process control capability
 
 A managed process now receives a random process-scoped control capability when it is started. The raw token is returned only to the caller; Runtime persists only its SHA-256 hash and redacts `control_token` from audit payloads.

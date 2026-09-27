@@ -163,6 +163,37 @@ async function reconcileRecord(
     return record;
   }
 
+  const live = liveChildren.get(record.processId)?.child;
+
+  // For a child owned by this Runtime instance, Node's ChildProcess lifecycle is
+  // more authoritative than a point-in-time PID probe. There is a small window
+  // after the OS process exits but before the async exit handler persists the
+  // durable "exited" record. Treating that window as "lost" creates a false
+  // terminal state and can race with markExited().
+  if (live) {
+    if (live.exitCode !== null || live.signalCode !== null) {
+      record.status = "exited";
+      record.exitCode = live.exitCode;
+      record.signal = live.signalCode as NodeJS.Signals | null;
+      record.inputAvailable = false;
+      await writeManagedProcess(record);
+      liveChildren.delete(record.processId);
+      await unpinWorkspaceLeaseForProcess(record.processId).catch(
+        () => undefined,
+      );
+      return record;
+    }
+
+    if (!pidAlive(record.pid)) {
+      // The child exit event has not been delivered yet. Keep the durable state
+      // non-terminal for this brief transition and let the next observation (or
+      // markExited) commit the real exit code/signal.
+      return record;
+    }
+
+    return record;
+  }
+
   if (pidAlive(record.pid)) {
     if (record.runtimeInstanceId !== runtimeInstanceId) {
       record.runtimeInstanceId = runtimeInstanceId;
@@ -173,12 +204,27 @@ async function reconcileRecord(
     return record;
   }
 
-  record.status = "lost";
-  record.inputAvailable = false;
-  record.exitCode = record.exitCode ?? null;
-  await writeManagedProcess(record);
-  await unpinWorkspaceLeaseForProcess(record.processId).catch(() => undefined);
-  return record;
+  // Re-read before declaring a process lost. A concurrent exit handler may
+  // have persisted "exited" after this caller loaded its stale "running"
+  // snapshot.
+  const latest = await readManagedProcess(record.processId).catch(
+    () => record,
+  );
+  if (
+    latest.status !== "running" &&
+    latest.status !== "terminating"
+  ) {
+    return latest;
+  }
+
+  latest.status = "lost";
+  latest.inputAvailable = false;
+  latest.exitCode = latest.exitCode ?? null;
+  await writeManagedProcess(latest);
+  await unpinWorkspaceLeaseForProcess(latest.processId).catch(
+    () => undefined,
+  );
+  return latest;
 }
 
 async function readLogTail(filePath: string, tailChars: number): Promise<string> {
@@ -629,18 +675,62 @@ export async function interactWithManagedProcess(
     controlToken?: string;
   } = {},
 ) {
+  const tailChars = options.tailChars ?? 20_000;
+  const before = await observeProcess(processId, tailChars);
+  const beforeData = before.data as Record<string, unknown>;
+  const beforeStdout =
+    typeof beforeData.stdout === "string" ? beforeData.stdout : "";
+  const beforeStderr =
+    typeof beforeData.stderr === "string" ? beforeData.stderr : "";
+
   const write = await sendProcessInput(
     processId,
     input,
     options.controlToken,
   );
-  const waited = await waitForProcessState(processId, {
-    states: ["waiting_input", "finished", "failed", "lost"],
-    timeoutMs: options.timeoutMs ?? 8_000,
-    pollMs: options.pollMs,
-    tailChars: options.tailChars,
-  });
-  return { write, ...waited };
+
+  const timeoutMs = Math.min(
+    Math.max(Math.trunc(options.timeoutMs ?? 8_000), 0),
+    60_000,
+  );
+  const pollMs = Math.min(
+    Math.max(Math.trunc(options.pollMs ?? 250), 100),
+    5_000,
+  );
+  const deadline = Date.now() + timeoutMs;
+
+  let observation = await observeProcess(processId, tailChars);
+  let matched = false;
+
+  while (true) {
+    const terminal = ["finished", "failed", "lost"].includes(
+      observation.state,
+    );
+    const data = observation.data as Record<string, unknown>;
+    const stdout = typeof data.stdout === "string" ? data.stdout : "";
+    const stderr = typeof data.stderr === "string" ? data.stderr : "";
+    const outputChanged =
+      stdout !== beforeStdout || stderr !== beforeStderr;
+    const newPrompt =
+      observation.state === "waiting_input" && outputChanged;
+
+    if (terminal || newPrompt) {
+      matched = true;
+      break;
+    }
+    if (Date.now() >= deadline) break;
+
+    await cancellableSleep(pollMs);
+    observation = await observeProcess(processId, tailChars);
+  }
+
+  return {
+    write,
+    matched,
+    timedOut: !matched && Date.now() >= deadline,
+    targetStates: ["waiting_input", "finished", "failed", "lost"],
+    observation,
+  };
 }
 
 export async function getProcessOutput(
