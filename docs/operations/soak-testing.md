@@ -1,6 +1,6 @@
 # Multi-Agent Soak Testing
 
-AgentOS Runtime uses long-duration soak tests to validate behavior that short unit and integration tests cannot reliably expose:
+OWL Runtime uses long-duration soak tests to validate behavior that short unit and integration tests cannot reliably expose:
 
 - deadlocks
 - workspace lease leaks
@@ -179,7 +179,7 @@ Long workflows should use durable Task/Process/Transaction ownership rather than
 
 ## 1.0 release use
 
-Before AgentOS Runtime 1.0:
+Before OWL Runtime 1.0:
 
 1. smoke must pass on every release candidate
 2. 2-hour soak must pass

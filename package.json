@@ -57,7 +57,9 @@
     "verify:execution-target": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-target.ts",
     "verify:support-package": "OWL_RUNTIME_MODE=test tsx scripts/verify-support-package.ts",
     "verify:browser-cancellation": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-cancellation.ts",
-    "verify:desktop-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-desktop-postconditions.ts"
+    "verify:desktop-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-desktop-postconditions.ts",
+    "verify:rc-fast": "node scripts/verify-release-candidate.mjs",
+    "verify:rc": "npm run verify:rc-fast && npm run soak:smoke"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

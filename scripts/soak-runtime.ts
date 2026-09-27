@@ -122,7 +122,7 @@ const reportPath =
 const latestPath = path.join(reportDir, "latest.json");
 const scratch =
   process.env.SOAK_SCRATCH_DIR?.trim() ||
-  path.join(os.tmpdir(), "agentos-soak", runId);
+  path.join(os.tmpdir(), "owl-runtime-soak", runId);
 const state = path.join(scratch, "state");
 
 const repoA = path.join(scratch, "repos", "a");
@@ -405,7 +405,7 @@ function startAdapterSuite(runNumber: number) {
       cwd: root,
       env: {
         ...process.env,
-        AGENTOS_RUNTIME_MODE: "test",
+        OWL_RUNTIME_MODE: "test",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
