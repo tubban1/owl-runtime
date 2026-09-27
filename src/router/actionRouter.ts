@@ -55,6 +55,10 @@ import {
 } from "../runtime/workspaceLeaseManager.js";
 import { currentExecutionContext } from "../runtime/executionContext.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
+import {
+  defaultVerificationForAction,
+  observeRoutedActionOutcome,
+} from "../observation/actionObservation.js";
 import { authorizeAction } from "../policy/approvalPolicy.js";
 
 type JsonObject = Record<string, unknown>;
@@ -853,6 +857,16 @@ export async function executeRoutedAction(
     resources,
     async () => await definition.run(parsed),
   );
+  const observation = await observeRoutedActionOutcome(
+    action,
+    parsed as JsonObject,
+    executed.result,
+  );
+  const verification = defaultVerificationForAction(
+    action,
+    executed.result,
+    observation,
+  );
 
   return {
     action,
@@ -862,6 +876,8 @@ export async function executeRoutedAction(
     contract: summarizeActionContract(contract),
     workspaceOwnership,
     approval,
+    observation,
+    verification,
     result: executed.result,
   };
   } finally {

@@ -163,6 +163,30 @@ function fail(error: unknown) {
 
 const execFileAsync = promisify(execFile);
 
+const verificationInputSchema = z.object({
+  id: z.string().min(1).max(200).optional(),
+  description: z.string().min(1).max(1000).optional(),
+  expectations: z.array(
+    z.object({
+      path: z.string().min(1).max(500),
+      operator: z.enum([
+        "exists",
+        "equals",
+        "contains",
+        "matches",
+        "truthy",
+        "falsy",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+      ]),
+      expected: z.unknown().optional(),
+      description: z.string().min(1).max(1000).optional(),
+    }),
+  ).min(1).max(20),
+});
+
 async function imagePreview(
   filePath: string,
 ): Promise<{ data: Buffer; mimeType: string; previewPath: string }> {
@@ -1677,6 +1701,7 @@ function createServer() {
           action: z.string().min(1),
           args: z.record(z.unknown()).optional(),
           depends_on: z.array(z.string()).optional(),
+          verify: verificationInputSchema.optional(),
         }),
       ).min(1).max(50),
       max_concurrency: z.number().int().min(1).max(8).optional(),
@@ -1697,6 +1722,15 @@ function createServer() {
           action: step.action,
           args: step.args,
           dependsOn: step.depends_on,
+          verify: step.verify
+            ? {
+                id: step.verify.id ?? `${step.id}:postcondition`,
+                ...(step.verify.description
+                  ? { description: step.verify.description }
+                  : {}),
+                expectations: step.verify.expectations,
+              }
+            : undefined,
         }));
 
         if (dry_run) {
@@ -1733,6 +1767,7 @@ function createServer() {
           action: z.string().min(1),
           args: z.record(z.unknown()).optional(),
           depends_on: z.array(z.string()).optional(),
+          verify: verificationInputSchema.optional(),
         }),
       ).min(1).max(50),
       max_concurrency: z.number().int().min(1).max(8).optional(),
@@ -1755,6 +1790,15 @@ function createServer() {
               action: step.action,
               args: step.args,
               dependsOn: step.depends_on,
+              verify: step.verify
+                ? {
+                    id: step.verify.id ?? `${step.id}:postcondition`,
+                    ...(step.verify.description
+                      ? { description: step.verify.description }
+                      : {}),
+                    expectations: step.verify.expectations,
+                  }
+                : undefined,
             })),
             {
               maxConcurrency: max_concurrency ?? 4,

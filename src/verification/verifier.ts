@@ -173,6 +173,32 @@ export function verifyObservation(
   };
 }
 
+export function uncertainVerificationReceipt(
+  specInput: VerificationSpec,
+  reason: string,
+  observation?: Observation | null,
+): VerificationReceipt {
+  const spec = verificationSpecSchema.parse(specInput) as VerificationSpec;
+  return {
+    abiVersion: VERIFIER_ABI_VERSION,
+    verificationId:
+      `verification_${Date.now().toString(36)}_${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    specId: spec.id,
+    checkedAt: new Date().toISOString(),
+    status: "uncertain",
+    observationIds: observation ? [observation.observationId] : [],
+    checks: [
+      {
+        path: "$observation",
+        operator: "exists",
+        status: "uncertain",
+        message: reason,
+      },
+    ],
+    evidence: observation?.evidence ?? [],
+  };
+}
+
 export function verificationFollowUp(
   receipt: VerificationReceipt,
   contract: Pick<ActionContract, "idempotent" | "retryPolicy" | "sideEffects">,

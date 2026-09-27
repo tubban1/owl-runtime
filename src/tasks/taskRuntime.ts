@@ -33,6 +33,30 @@ import {
   type PersistentTask,
   type PersistentTaskStep,
 } from "./taskStore.js";
+import type { Observation } from "../observation/observationAbi.js";
+import {
+  uncertainVerificationReceipt,
+  verifyObservation,
+  type VerificationReceipt,
+  type VerificationSpec,
+} from "../verification/verifier.js";
+
+type StepExecutionResult =
+  | {
+      id: string;
+      ok: true;
+      provider: string;
+      durationMs: number;
+      observation: Observation | null;
+      verification: VerificationReceipt | null;
+      result: unknown;
+    }
+  | {
+      id: string;
+      ok: false;
+      durationMs: number;
+      error: string;
+    };
 
 const INSTANCE_ID = randomUUID();
 const activeRuns = new Set<string>();
@@ -178,6 +202,13 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       riskLevel: step.riskLevel ?? null,
       sideEffects: step.sideEffects ?? [],
       requiresVerification: step.requiresVerification ?? false,
+      verificationSpec: step.verificationSpec
+        ? {
+            id: step.verificationSpec.id,
+            description: step.verificationSpec.description ?? null,
+            expectations: step.verificationSpec.expectations,
+          }
+        : null,
       resources: step.resources ?? [],
       state: step.state,
       attempts: step.attempts,
@@ -186,6 +217,23 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       completedAt: step.completedAt ?? null,
       error: step.error ?? null,
       recoveryNote: step.recoveryNote ?? null,
+      observation: step.observation
+        ? {
+            id: step.observation.observationId,
+            channel: step.observation.channel,
+            provider: step.observation.provider,
+            state: step.observation.state,
+            evidenceCount: step.observation.evidence.length,
+          }
+        : null,
+      verification: step.verification
+        ? {
+            id: step.verification.verificationId,
+            specId: step.verification.specId,
+            status: step.verification.status,
+            checkedAt: step.verification.checkedAt,
+          }
+        : null,
       ...(includeResults ? { result: step.result ?? null } : {}),
     })),
     events: task.events.slice(-100),
@@ -303,6 +351,7 @@ export type PrimitiveTaskStep = {
   op: string;
   args?: Record<string, unknown>;
   dependsOn?: string[];
+  verify?: VerificationSpec;
 };
 
 export async function createPersistentTask(
@@ -357,7 +406,9 @@ export async function createPersistentTask(
         retryPolicy: planned.contract.retryPolicy,
         riskLevel: planned.contract.riskLevel,
         sideEffects: planned.contract.sideEffects,
-        requiresVerification: planned.contract.requiresVerification,
+        requiresVerification:
+          planned.contract.requiresVerification || Boolean(step.verify),
+        verificationSpec: step.verify,
         resources: planned.contract.resources,
         state: "pending",
         attempts: 0,
@@ -405,6 +456,7 @@ export function validatePrimitiveTaskSteps(
       action: routed.routedAction,
       args: step.args ?? {},
       dependsOn: step.dependsOn,
+      verify: step.verify,
     };
   });
 
@@ -471,7 +523,9 @@ export async function createPersistentPrimitiveTask(
         retryPolicy: planned.contract.retryPolicy,
         riskLevel: planned.contract.riskLevel,
         sideEffects: planned.contract.sideEffects,
-        requiresVerification: planned.contract.requiresVerification,
+        requiresVerification:
+          planned.contract.requiresVerification || Boolean(step.verify),
+        verificationSpec: step.verify,
         resources: planned.contract.resources,
         state: "pending",
         attempts: 0,
@@ -640,6 +694,8 @@ export async function resolvePersistentTaskStep(
     step.durationMs = undefined;
     step.error = undefined;
     step.result = undefined;
+    step.observation = undefined;
+    step.verification = undefined;
     step.recoveryNote = undefined;
     appendTaskEvent(task, {
       type: "step_retry",
@@ -651,6 +707,7 @@ export async function resolvePersistentTaskStep(
     step.completedAt = new Date().toISOString();
     step.error = undefined;
     step.result = result;
+    step.verification = undefined;
     step.recoveryNote = "Manually marked succeeded after review.";
     appendTaskEvent(task, {
       type: "step_marked_succeeded",
@@ -875,8 +932,8 @@ export async function runPersistentTask(
 
       await writePersistentTask(task);
 
-      const results = await Promise.all(
-        wave.map(async (step) =>
+      const results: StepExecutionResult[] = await Promise.all(
+        wave.map(async (step): Promise<StepExecutionResult> =>
           await withChildExecutionContext(
             {
               sessionId:
@@ -912,6 +969,8 @@ export async function runPersistentTask(
                     ok: true as const,
                     provider: executed.provider,
                     durationMs: Date.now() - stepStartedAt,
+                    observation: executed.observation,
+                    verification: executed.verification,
                     result: executed.result,
                   };
                 }
@@ -926,6 +985,8 @@ export async function runPersistentTask(
                   ok: true as const,
                   provider: executed.provider,
                   durationMs: Date.now() - stepStartedAt,
+                  observation: executed.observation,
+                  verification: executed.verification,
                   result: executed.result,
                 };
               } catch (error) {
@@ -974,52 +1035,96 @@ export async function runPersistentTask(
         step.completedAt = new Date().toISOString();
 
         if (result.ok) {
-          step.state = "succeeded";
           step.result = result.result;
+          step.observation = result.observation ?? undefined;
+          const verification = step.verificationSpec
+            ? result.observation
+              ? verifyObservation(result.observation, step.verificationSpec)
+              : uncertainVerificationReceipt(
+                  step.verificationSpec,
+                  `No Observation was produced for ${step.action}; explicit postconditions cannot be evaluated safely.`,
+                )
+            : result.verification;
+          step.verification = verification ?? undefined;
           step.error = undefined;
-          appendTaskEvent(task, {
-            type: "step_succeeded",
-            stepId: step.id,
-            message: `${step.action} succeeded in ${result.durationMs} ms.`,
-          });
 
-          try {
-            const staged = await stageArtifactsFromResult(
-              task.id,
-              step.id,
-              result.result,
-              task.stagedArtifacts ?? [],
-            );
-            if (staged.length > 0) {
-              task.stagedArtifacts = [...(task.stagedArtifacts ?? []), ...staged];
-              if (
-                step.result &&
-                typeof step.result === "object" &&
-                !Array.isArray(step.result)
-              ) {
-                step.result = {
-                  ...(step.result as Record<string, unknown>),
-                  staging: {
-                    artifacts: staged,
-                  },
-                };
-              }
-              for (const artifact of staged) {
-                appendTaskEvent(task, {
-                  type: "artifact_staged",
-                  stepId: step.id,
-                  message: `Staged ${artifact.filename} (${artifact.bytes} bytes).`,
-                });
-              }
-            }
-          } catch (error) {
+          const verificationNeedsReview =
+            Boolean(step.requiresVerification) &&
+            Boolean(verification) &&
+            verification?.status !== "verified";
+
+          if (verificationNeedsReview) {
+            step.state = "needs_review";
+            step.recoveryNote =
+              `Postcondition verification returned ${verification?.status}; review evidence before retrying or marking the step succeeded.`;
             appendTaskEvent(task, {
-              type: "staging_warning",
+              type: "step_verification_review",
               stepId: step.id,
               message:
-                "Step succeeded, but artifact staging failed: " +
-                (error instanceof Error ? error.message : String(error)),
+                `${step.action} executed, but verification is ${verification?.status}; task is blocked for review.`,
             });
+          } else {
+            step.state = "succeeded";
+            if (verification?.status === "verified") {
+              appendTaskEvent(task, {
+                type: "step_verified",
+                stepId: step.id,
+                message: `${step.action} postconditions verified.`,
+              });
+            } else if (step.requiresVerification && !verification) {
+              appendTaskEvent(task, {
+                type: "step_verification_unavailable",
+                stepId: step.id,
+                message:
+                  `${step.action} requires verification by contract, but no default verifier is wired yet; compatibility behavior accepted the action result.`,
+              });
+            }
+            appendTaskEvent(task, {
+              type: "step_succeeded",
+              stepId: step.id,
+              message: `${step.action} succeeded in ${result.durationMs} ms.`,
+            });
+          }
+
+          if (step.state === "succeeded") {
+            try {
+              const staged = await stageArtifactsFromResult(
+                task.id,
+                step.id,
+                result.result,
+                task.stagedArtifacts ?? [],
+              );
+              if (staged.length > 0) {
+                task.stagedArtifacts = [...(task.stagedArtifacts ?? []), ...staged];
+                if (
+                  step.result &&
+                  typeof step.result === "object" &&
+                  !Array.isArray(step.result)
+                ) {
+                  step.result = {
+                    ...(step.result as Record<string, unknown>),
+                    staging: {
+                      artifacts: staged,
+                    },
+                  };
+                }
+                for (const artifact of staged) {
+                  appendTaskEvent(task, {
+                    type: "artifact_staged",
+                    stepId: step.id,
+                    message: `Staged ${artifact.filename} (${artifact.bytes} bytes).`,
+                  });
+                }
+              }
+            } catch (error) {
+              appendTaskEvent(task, {
+                type: "staging_warning",
+                stepId: step.id,
+                message:
+                  "Step succeeded, but artifact staging failed: " +
+                  (error instanceof Error ? error.message : String(error)),
+              });
+            }
           }
         } else {
           step.state = "failed";

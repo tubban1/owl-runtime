@@ -5,6 +5,7 @@ import {
   approvalHealth,
   getHealthModelManifest,
   processHealth,
+  providerHealth,
   taskHealth,
 } from "../src/health/healthModel.js";
 
@@ -29,6 +30,37 @@ const pendingApproval = approvalHealth({
   expiresAt: new Date(Date.now() + 60000).toISOString(), ownerSessionId: "test", reason: "test",
 });
 assert.equal(pendingApproval.state, "needs_attention");
+
+const desktopMissingPermissions = providerHealth({
+  id: "desktop",
+  label: "Desktop",
+  enabled: true,
+  available: true,
+  capabilities: ["desktop", "accessibility", "region-screenshot"],
+  details: {
+    helperInstalled: true,
+    helperMode: "required",
+    helper: {
+      accessibilityTrusted: false,
+      screenCaptureAllowed: false,
+    },
+  },
+});
+assert.equal(desktopMissingPermissions.state, "needs_attention");
+assert.equal(desktopMissingPermissions.code, "provider_permissions_missing");
+assert.deepEqual(
+  desktopMissingPermissions.details?.missingPermissions,
+  ["accessibility", "screen_recording"],
+);
+
+const healthyBrowser = providerHealth({
+  id: "browser",
+  label: "Browser",
+  enabled: true,
+  available: true,
+  capabilities: ["browser"],
+});
+assert.equal(healthyBrowser.state, "healthy");
 
 const aggregate = aggregateHealth([runningTask, blockedTask]);
 assert.equal(aggregate.state, "needs_attention");

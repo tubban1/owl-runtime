@@ -66,7 +66,11 @@ import {
 import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
 import { getObservationAbiManifest, type ObservationState } from "../observation/observationAbi.js";
-import { getVerifierAbiManifest } from "../verification/verifier.js";
+import {
+  getVerifierAbiManifest,
+  verificationSpecSchema,
+  type VerificationSpec,
+} from "../verification/verifier.js";
 import {
   approveApproval,
   authorizeSkill,
@@ -76,9 +80,11 @@ import {
   readApproval,
 } from "../policy/approvalPolicy.js";
 import {
+  aggregateHealth,
   approvalHealth,
   getHealthModelManifest,
   processHealth,
+  providerHealth,
   taskHealth,
 } from "../health/healthModel.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
@@ -665,8 +671,19 @@ function parsePrimitiveTaskSteps(
     const dependsOn = dependsOnRaw.filter(
       (dependency): dependency is string => typeof dependency === "string",
     );
+    let verify: VerificationSpec | undefined;
+    if (value.verify && typeof value.verify === "object" && !Array.isArray(value.verify)) {
+      const rawVerify = value.verify as Record<string, unknown>;
+      verify = verificationSpecSchema.parse({
+        ...rawVerify,
+        id:
+          typeof rawVerify.id === "string" && rawVerify.id.trim()
+            ? rawVerify.id.trim()
+            : `${id}:postcondition`,
+      }) as VerificationSpec;
+    }
 
-    return { id, primitive, op, args: stepArgs, dependsOn };
+    return { id, primitive, op, args: stepArgs, dependsOn, verify };
   });
 }
 
@@ -1202,7 +1219,7 @@ const skills: SkillDefinition[] = [
     inputs: {
       label: "Human-readable task label.",
       steps:
-        "Array of Primitive steps: {id, primitive, op, args?, depends_on?}. $ref dependencies are supported.",
+        "Array of Primitive steps: {id, primitive, op, args?, depends_on?, verify?}. verify declares Observation postconditions; $ref dependencies are supported.",
       max_concurrency: "Maximum parallel Primitive steps; default 4, max 8.",
       fail_fast: "Stop after the first failed execution wave; default true.",
     },
@@ -2110,10 +2127,11 @@ const skills: SkillDefinition[] = [
     keywords: ["health", "worker health", "task health", "process health", "健康状态", "运行健康"],
     contract: HEALTH_CONTRACT,
     inputs: {
-      op: "status | task | process | approval. Default: status.",
+      op: "status | task | process | approval | provider | providers. Default: status.",
       task_id: "Persistent Task id for op=task.",
       process_id: "Managed process id for op=process.",
       approval_id: "Approval id for op=approval.",
+      provider_id: "Provider id for op=provider.",
       tail_chars: "Optional process observation log tail length.",
     },
     dryRunPlan: (args) => ({ op: args.op ?? "status", sourceId: args.task_id ?? args.process_id ?? args.approval_id ?? null }),
@@ -2133,7 +2151,23 @@ const skills: SkillDefinition[] = [
       if (operation === "approval") {
         return approvalHealth(await readApproval(requiredText(args, "approval_id")));
       }
-      throw new Error('runtime.health op must be "status", "task", "process", or "approval".');
+      if (operation === "providers") {
+        const providers = await getProviderStatuses();
+        const signals = providers.map(providerHealth);
+        return {
+          providers: signals,
+          aggregate: aggregateHealth(signals),
+        };
+      }
+      if (operation === "provider") {
+        const providerId = requiredText(args, "provider_id");
+        const provider = (await getProviderStatuses()).find(
+          (item) => item.id === providerId,
+        );
+        if (!provider) throw new Error(`Unknown provider "${providerId}".`);
+        return providerHealth(provider);
+      }
+      throw new Error('runtime.health op must be "status", "task", "process", "approval", "provider", or "providers".');
     },
   },
   {

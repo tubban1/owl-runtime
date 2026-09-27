@@ -674,6 +674,8 @@ export async function executePrimitive(
     contract: executed.contract,
     resourceWaitMs: executed.resourceWaitMs,
     durationMs: executed.durationMs,
+    observation: executed.observation,
+    verification: executed.verification,
     result: executed.result,
   };
 }

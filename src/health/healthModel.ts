@@ -1,6 +1,7 @@
 import type { Observation } from "../observation/observationAbi.js";
 import type { PersistentTaskStatus } from "../tasks/taskStore.js";
 import type { ApprovalRecord } from "../policy/approvalPolicy.js";
+import type { ProviderStatus } from "../providers/types.js";
 
 export const HEALTH_MODEL_VERSION = 1 as const;
 export const HEALTH_STATES = [
@@ -96,6 +97,95 @@ export function approvalHealth(record: ApprovalRecord): HealthSignal {
     case "expired":
       return signal({ ...common, state: "needs_attention", code: "approval_expired", summary: `${record.subject} approval expired before execution.`, actionable: true });
   }
+}
+
+export function providerHealth(status: ProviderStatus): HealthSignal {
+  const common = { source: "provider" as const, sourceId: status.id };
+
+  if (!status.enabled) {
+    return signal({
+      ...common,
+      state: "paused",
+      code: "provider_disabled",
+      summary: `${status.label} provider is disabled by policy/configuration.`,
+      actionable: true,
+      details: { capabilities: status.capabilities, status },
+    });
+  }
+
+  if (!status.available) {
+    return signal({
+      ...common,
+      state: "broken",
+      code: "provider_unavailable",
+      summary: `${status.label} provider is not available on this machine.`,
+      actionable: true,
+      details: { capabilities: status.capabilities, status },
+    });
+  }
+
+  if (status.id === "desktop") {
+    const helper =
+      status.details?.helper &&
+      typeof status.details.helper === "object"
+        ? (status.details.helper as Record<string, unknown>)
+        : null;
+
+    if (helper) {
+      const missingPermissions: string[] = [];
+      if (helper.accessibilityTrusted === false) {
+        missingPermissions.push("accessibility");
+      }
+      if (helper.screenCaptureAllowed === false) {
+        missingPermissions.push("screen_recording");
+      }
+      if (missingPermissions.length > 0) {
+        return signal({
+          ...common,
+          state: "needs_attention",
+          code: "provider_permissions_missing",
+          summary: `Desktop provider needs macOS permission: ${missingPermissions.join(", ")}.`,
+          actionable: true,
+          details: {
+            missingPermissions,
+            helperInstalled: status.details?.helperInstalled ?? null,
+            helperMode: status.details?.helperMode ?? null,
+          },
+        });
+      }
+
+      if (typeof helper.error === "string" && helper.error) {
+        return signal({
+          ...common,
+          state: "degraded",
+          code: "provider_helper_error",
+          summary: "Desktop helper is installed but its runtime status could not be read cleanly.",
+          actionable: true,
+          details: { helperError: helper.error },
+        });
+      }
+    }
+
+    if (status.details?.helperInstalled === false) {
+      return signal({
+        ...common,
+        state: "needs_attention",
+        code: "provider_helper_missing",
+        summary: "Desktop provider needs the OWL/Computer MCP native helper.",
+        actionable: true,
+        details: { helperMode: status.details?.helperMode ?? null },
+      });
+    }
+  }
+
+  return signal({
+    ...common,
+    state: "healthy",
+    code: "provider_ready",
+    summary: `${status.label} provider is available.`,
+    actionable: false,
+    details: { capabilities: status.capabilities },
+  });
 }
 
 const severity: Record<HealthState, number> = {

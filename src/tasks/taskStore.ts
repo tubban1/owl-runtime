@@ -3,6 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { StagedArtifact } from "./taskStaging.js";
+import type { Observation } from "../observation/observationAbi.js";
+import type {
+  VerificationReceipt,
+  VerificationSpec,
+} from "../verification/verifier.js";
 import {
   createCipheriv,
   createDecipheriv,
@@ -40,6 +45,7 @@ export interface PersistentTaskStep {
   riskLevel?: "low" | "medium" | "high" | "critical";
   sideEffects?: string[];
   requiresVerification?: boolean;
+  verificationSpec?: VerificationSpec;
   resources?: Array<{ key: string; mode: "shared" | "exclusive" }>;
   state: PersistentStepState;
   attempts: number;
@@ -47,6 +53,8 @@ export interface PersistentTaskStep {
   completedAt?: string;
   durationMs?: number;
   result?: unknown;
+  observation?: Observation;
+  verification?: VerificationReceipt;
   error?: string;
   recoveryNote?: string;
 }
