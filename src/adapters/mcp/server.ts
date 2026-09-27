@@ -1018,6 +1018,7 @@ function createServer() {
       approvalReceipts: true,
       executionHealthModel: true,
       publicRuntimeApiV01: true,
+      executionTargetContract: true,
           skillRuntime: true,
           skillAbi: true,
           resourceArbiter: true,

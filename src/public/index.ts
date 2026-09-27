@@ -4,6 +4,7 @@ export {
   type RuntimeClient,
   type RuntimeClientInfo,
   type RuntimeTransport,
+  type PublicExecutionTarget,
   type PublicVerificationOperator,
   type PublicVerificationExpectation,
   type PublicVerificationSpec,

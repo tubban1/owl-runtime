@@ -24,6 +24,11 @@ import {
 import { releaseWorkspaceLeasesForTask } from "../runtime/workspaceLeaseManager.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
+  assertExecutionTargetAvailable,
+  normalizeExecutionTarget,
+  type ExecutionTarget,
+} from "../runtime/executionTarget.js";
+import {
   appendTaskEvent,
   deletePersistentTaskRecord,
   getTaskStorageInfo,
@@ -138,6 +143,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
     label: task.label,
     status: task.status,
     ownerSessionId: task.ownerSessionId ?? null,
+    executionTarget: normalizeExecutionTarget(task.executionTarget),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     runCount: task.runCount,
@@ -357,7 +363,11 @@ export type PrimitiveTaskStep = {
 export async function createPersistentTask(
   label: string,
   steps: GraphStep[],
-  options?: { maxConcurrency?: number; failFast?: boolean },
+  options?: {
+    maxConcurrency?: number;
+    failFast?: boolean;
+    executionTarget?: ExecutionTarget;
+  },
 ) {
   const plan = planActionGraph(steps);
   const validationErrors = plan.filter((step) => step.validationError);
@@ -369,6 +379,9 @@ export async function createPersistentTask(
     );
   }
 
+  const executionTarget = assertExecutionTargetAvailable(
+    options?.executionTarget ?? currentExecutionContext().executionTarget,
+  );
   const now = new Date().toISOString();
   const id = newTaskId();
   const stage = await ensureTaskStage(id);
@@ -378,6 +391,7 @@ export async function createPersistentTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    executionTarget,
     createdAt: now,
     updatedAt: now,
     status: "pending",
@@ -479,9 +493,13 @@ export async function createPersistentPrimitiveTask(
     maxConcurrency?: number;
     failFast?: boolean;
     taskId?: string;
+    executionTarget?: ExecutionTarget;
   },
 ) {
   const plan = validatePrimitiveTaskSteps(steps);
+  const executionTarget = assertExecutionTargetAvailable(
+    options?.executionTarget ?? currentExecutionContext().executionTarget,
+  );
 
   const now = new Date().toISOString();
   const id = options?.taskId ?? newTaskId();
@@ -492,6 +510,7 @@ export async function createPersistentPrimitiveTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    executionTarget,
     createdAt: now,
     updatedAt: now,
     status: "pending",
@@ -790,6 +809,7 @@ export async function runPersistentTask(
           task.ownerSessionId ?? currentExecutionContext().sessionId,
         taskId: task.id,
         origin: "task",
+        executionTarget: normalizeExecutionTarget(task.executionTarget),
       },
     },
   );
@@ -940,6 +960,7 @@ export async function runPersistentTask(
                 task.ownerSessionId ?? currentExecutionContext().sessionId,
               origin: "task",
               taskId: task.id,
+              executionTarget: normalizeExecutionTarget(task.executionTarget),
             },
             async () => {
               const stepStartedAt = Date.now();

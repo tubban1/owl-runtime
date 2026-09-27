@@ -19,6 +19,12 @@ import {
 } from "./schedulerStore.js";
 import { runtimeLifecycle } from "./runtimeLifecycle.js";
 import { injectTestFault } from "./faultInjection.js";
+import { currentExecutionContext } from "./executionContext.js";
+import {
+  assertExecutionTargetAvailable,
+  normalizeExecutionTarget,
+  type ExecutionTarget,
+} from "./executionTarget.js";
 
 type CreateScheduleInput = {
   label: string;
@@ -32,6 +38,7 @@ type CreateScheduleInput = {
   stopWhen?: ScheduleStopWhen;
   maxRuns?: number;
   endAt?: string;
+  executionTarget?: ExecutionTarget;
 };
 
 const activeSchedules = new Set<string>();
@@ -180,6 +187,9 @@ function summarize(schedule: PersistentSchedule) {
       failFast: schedule.taskTemplate.failFast,
       maxWaves: schedule.taskTemplate.maxWaves,
       timeBudgetMs: schedule.taskTemplate.timeBudgetMs,
+      executionTarget: normalizeExecutionTarget(
+        schedule.taskTemplate.executionTarget,
+      ),
     },
     storage: getScheduleStorageInfo(),
   };
@@ -192,6 +202,9 @@ export async function createPrimitiveSchedule(
   if (!label) throw new Error("Schedule label is required.");
   validatePrimitiveTaskSteps(input.steps);
 
+  const executionTarget = assertExecutionTargetAvailable(
+    input.executionTarget ?? currentExecutionContext().executionTarget,
+  );
   const trigger = normalizeTrigger(input.trigger);
   const now = Date.now();
   const maxConcurrency = Math.min(
@@ -256,6 +269,7 @@ export async function createPrimitiveSchedule(
       failFast: input.failFast ?? true,
       maxWaves,
       timeBudgetMs,
+      executionTarget,
     },
     ...(input.stopWhen ? { stopWhen: input.stopWhen } : {}),
     ...(maxRuns ? { maxRuns } : {}),
@@ -363,6 +377,9 @@ async function ensureScheduledTask(
       maxConcurrency: schedule.taskTemplate.maxConcurrency,
       failFast: schedule.taskTemplate.failFast,
       taskId,
+      executionTarget: normalizeExecutionTarget(
+        schedule.taskTemplate.executionTarget,
+      ),
     },
   );
 }

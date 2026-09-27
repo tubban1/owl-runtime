@@ -29,6 +29,7 @@ The reference implementation is `InProcessRuntimeClient`. IPC/HTTP/native implem
 ### Discovery
 - `info()`
 - `getCapabilities(goal?)`
+- `getExecutionTargets()`
 - `getPrimitiveCatalog()`
 - `getSkillCatalog()`
 
@@ -96,7 +97,7 @@ Current guidance:
 | Health | candidate | provider/task/process/approval states can integrate |
 | Process | candidate | **do not rely on heavy multi-session control yet**; ownership/reconnect P0 remains |
 | Browser/Desktop | internal execution works | real consumer migration waits for Observation/Verifier and provider permission semantics to settle |
-| Sandbox/ExecutionTarget | not yet public | consumers should file Contract Request |
+| ExecutionTarget / Provider Affinity | candidate v1 | `host` ready; `sandbox` / `remote` explicitly fail closed until providers exist |
 
 ## Transport
 

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { StagedArtifact } from "./taskStaging.js";
+import type { ExecutionTarget } from "../runtime/executionTarget.js";
 import type { Observation } from "../observation/observationAbi.js";
 import type {
   VerificationReceipt,
@@ -71,6 +72,7 @@ export interface PersistentTask {
   id: string;
   label: string;
   ownerSessionId?: string;
+  executionTarget?: ExecutionTarget;
   createdAt: string;
   updatedAt: string;
   status: PersistentTaskStatus;

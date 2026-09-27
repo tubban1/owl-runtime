@@ -31,6 +31,11 @@ import {
   readApproval,
 } from "../policy/approvalPolicy.js";
 import { RUNTIME_VERSION } from "../runtime/runtimeVersion.js";
+import { withChildExecutionContext } from "../runtime/executionContext.js";
+import {
+  assertExecutionTargetAvailable,
+  getExecutionTargetManifest,
+} from "../runtime/executionTarget.js";
 
 export const RUNTIME_PUBLIC_API_VERSION = "0.1" as const;
 
@@ -40,6 +45,13 @@ export type RuntimeClientInfo = {
   apiVersion: typeof RUNTIME_PUBLIC_API_VERSION;
   runtimeVersion: string;
   transport: RuntimeTransport;
+};
+
+export type PublicExecutionTarget = {
+  kind: "host" | "sandbox" | "remote";
+  targetId?: string;
+  providerAffinity?: string[];
+  allowFallback?: false;
 };
 
 export type PublicVerificationOperator =
@@ -71,12 +83,14 @@ export type PrimitiveCallRequest = {
   primitive: string;
   op: string;
   args?: Record<string, unknown>;
+  executionTarget?: PublicExecutionTarget;
 };
 
 export type SkillRunRequest = {
   skill: string;
   args?: Record<string, unknown>;
   dryRun?: boolean;
+  executionTarget?: PublicExecutionTarget;
 };
 
 export type TaskStepRequest = {
@@ -101,6 +115,7 @@ export type CreateTaskRequest = {
   steps: TaskStepRequest[];
   maxConcurrency?: number;
   failFast?: boolean;
+  executionTarget?: PublicExecutionTarget;
 };
 
 export type RunTaskRequest = {
@@ -141,6 +156,7 @@ export type CreateScheduleRequest = {
   stopWhen?: PublicScheduleStopWhen;
   maxRuns?: number;
   endAt?: string;
+  executionTarget?: PublicExecutionTarget;
 };
 
 export type ApprovalState =
@@ -158,7 +174,7 @@ export type HealthRequest =
   | { op: "provider"; provider_id: string }
   | { op: "providers" };
 
-export type ProcessRequest =
+export type ProcessRequest = (
   | { op?: "list" }
   | { op: "status" | "observe"; process_id: string; tail_chars?: number }
   | {
@@ -178,12 +194,25 @@ export type ProcessRequest =
       tail_chars?: number;
       control_token?: string;
     }
-  | { op: "claim"; process_id: string; control_token?: string };
+  | { op: "claim"; process_id: string; control_token?: string }
+) & { executionTarget?: PublicExecutionTarget };
+
+async function withPublicExecutionTarget<T>(
+  input: PublicExecutionTarget | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const executionTarget = assertExecutionTargetAvailable(input);
+  return await withChildExecutionContext(
+    { executionTarget },
+    operation,
+  );
+}
 
 export interface RuntimeClient {
   info(): Promise<RuntimeClientInfo>;
 
   getCapabilities(goal?: string): Promise<unknown>;
+  getExecutionTargets(): Promise<unknown>;
   getPrimitiveCatalog(): Promise<unknown>;
   callPrimitive(request: PrimitiveCallRequest): Promise<unknown>;
   getSkillCatalog(): Promise<unknown>;
@@ -232,15 +261,23 @@ export class InProcessRuntimeClient implements RuntimeClient {
     return await getCapabilityManifest(goal);
   }
 
+  async getExecutionTargets(): Promise<unknown> {
+    return getExecutionTargetManifest();
+  }
+
   async getPrimitiveCatalog(): Promise<unknown> {
     return getPrimitiveCatalog();
   }
 
   async callPrimitive(request: PrimitiveCallRequest): Promise<unknown> {
-    return await executePrimitive(
-      request.primitive,
-      request.op,
-      request.args ?? {},
+    return await withPublicExecutionTarget(
+      request.executionTarget,
+      async () =>
+        await executePrimitive(
+          request.primitive,
+          request.op,
+          request.args ?? {},
+        ),
     );
   }
 
@@ -249,21 +286,32 @@ export class InProcessRuntimeClient implements RuntimeClient {
   }
 
   async runSkill(request: SkillRunRequest): Promise<unknown> {
-    return await executeSkill(
-      request.skill,
-      request.args ?? {},
-      request.dryRun ?? false,
+    return await withPublicExecutionTarget(
+      request.executionTarget,
+      async () =>
+        await executeSkill(
+          request.skill,
+          request.args ?? {},
+          request.dryRun ?? false,
+        ),
     );
   }
 
   async createTask(request: CreateTaskRequest): Promise<unknown> {
-    return await createPersistentTask(
-      request.label,
-      request.steps as Parameters<typeof createPersistentTask>[1],
-      {
-        maxConcurrency: request.maxConcurrency,
-        failFast: request.failFast,
-      },
+    return await withPublicExecutionTarget(
+      request.executionTarget,
+      async () =>
+        await createPersistentTask(
+          request.label,
+          request.steps as Parameters<typeof createPersistentTask>[1],
+          {
+            maxConcurrency: request.maxConcurrency,
+            failFast: request.failFast,
+            executionTarget: assertExecutionTargetAvailable(
+              request.executionTarget,
+            ),
+          },
+        ),
     );
   }
 
@@ -306,8 +354,12 @@ export class InProcessRuntimeClient implements RuntimeClient {
   }
 
   async createSchedule(request: CreateScheduleRequest): Promise<unknown> {
-    return await createPrimitiveSchedule(
-      request as Parameters<typeof createPrimitiveSchedule>[0],
+    return await withPublicExecutionTarget(
+      request.executionTarget,
+      async () =>
+        await createPrimitiveSchedule(
+          request as Parameters<typeof createPrimitiveSchedule>[0],
+        ),
     );
   }
 
@@ -354,10 +406,15 @@ export class InProcessRuntimeClient implements RuntimeClient {
   }
 
   async process(request: ProcessRequest): Promise<unknown> {
-    return await executeSkill(
-      "runtime.process",
-      request as Record<string, unknown>,
-      false,
+    const { executionTarget, ...args } = request;
+    return await withPublicExecutionTarget(
+      executionTarget,
+      async () =>
+        await executeSkill(
+          "runtime.process",
+          args as Record<string, unknown>,
+          false,
+        ),
     );
   }
 

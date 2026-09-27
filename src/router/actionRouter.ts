@@ -54,6 +54,7 @@ import {
   ensureWorkspaceWriteLease,
 } from "../runtime/workspaceLeaseManager.js";
 import { currentExecutionContext } from "../runtime/executionContext.js";
+import { assertProviderAffinity } from "../runtime/executionTarget.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
   defaultVerificationForAction,
@@ -790,8 +791,12 @@ export async function executeRoutedAction(
   const parsed = definition.schema.parse(args ?? {});
   const contract = getActionContract(action, parsed);
   const startedAt = Date.now();
-  const approval = await authorizeAction(action, parsed, contract);
   const executionContext = currentExecutionContext();
+  const executionTarget = assertProviderAffinity(
+    definition.provider,
+    executionContext.executionTarget,
+  );
+  const approval = await authorizeAction(action, parsed, contract);
   const lifecycleMutation =
     contract.sideEffects.length > 0
       ? runtimeLifecycle.beginMutation(action, {
@@ -878,6 +883,7 @@ export async function executeRoutedAction(
   return {
     action,
     provider: definition.provider,
+    executionTarget,
     durationMs: Date.now() - startedAt,
     resourceWaitMs: executed.lease.waitMs,
     contract: summarizeActionContract(contract),

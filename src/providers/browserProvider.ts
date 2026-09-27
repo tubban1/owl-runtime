@@ -146,6 +146,7 @@ class BrowserProvider implements ComputerProvider {
       enabled: envFlag("ALLOW_BROWSER", false),
       available: Boolean(executable),
       capabilities: ["browser"],
+      executionTargets: ["host"],
       details: {
         executable,
         connected: Boolean(this.context),

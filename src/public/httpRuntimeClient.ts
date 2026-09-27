@@ -170,6 +170,10 @@ export class HttpRuntimeClient implements RuntimeClient {
     return await this.rpc("capabilities.get", { goal });
   }
 
+  async getExecutionTargets(): Promise<unknown> {
+    return await this.rpc("execution-targets.get");
+  }
+
   async getPrimitiveCatalog(): Promise<unknown> {
     return await this.rpc("primitives.catalog");
   }

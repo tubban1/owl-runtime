@@ -9,6 +9,7 @@ This directory is organized by document purpose rather than release chronology.
 - [Architecture overview](architecture/overview.md)
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
+- [v1.0 scope lock](roadmap/1.0-scope-lock.md)
 - [Production Runtime](operations/production-runtime.md)
 - [Concurrency and ownership](architecture/concurrency-and-ownership.md)
 
@@ -29,6 +30,7 @@ Contracts intended to remain stable across implementations.
 - [Primitive ABI](specifications/primitive-abi.md)
 - [Observation ABI](specifications/observation-abi.md)
 - [Verifier ABI](specifications/verifier-abi.md)
+- [ExecutionTarget and Provider Affinity](specifications/execution-target.md)
 - [Skill ABI](specifications/skill-abi.md)
 - [Embedding Provider Contract](specifications/embedding-provider.md)
 - [Session Adapter Contract](specifications/session-adapter.md)

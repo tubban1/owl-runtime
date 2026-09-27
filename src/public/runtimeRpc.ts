@@ -14,6 +14,7 @@ import type {
 export const RUNTIME_RPC_METHODS = [
   "info",
   "capabilities.get",
+  "execution-targets.get",
   "primitives.catalog",
   "primitive.call",
   "skills.catalog",
@@ -77,6 +78,8 @@ export async function invokeRuntimeRpc(
       return await client.getCapabilities(
         typeof object.goal === "string" ? object.goal : "",
       );
+    case "execution-targets.get":
+      return await client.getExecutionTargets();
     case "primitives.catalog":
       return await client.getPrimitiveCatalog();
     case "primitive.call":

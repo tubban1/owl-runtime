@@ -380,6 +380,7 @@ class DesktopProvider implements ComputerProvider {
         "clipboard-transaction",
         "native-helper",
       ],
+      executionTargets: ["host"],
       details: {
         platform: process.platform,
         helperMode: helperMode(),

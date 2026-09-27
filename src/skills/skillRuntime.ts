@@ -65,6 +65,7 @@ import {
 } from "../runtime/sessionAdapters.js";
 import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
+import { getExecutionTargetManifest } from "../runtime/executionTarget.js";
 import { getObservationAbiManifest, type ObservationState } from "../observation/observationAbi.js";
 import {
   getVerifierAbiManifest,
@@ -3518,6 +3519,7 @@ export async function getCapabilityManifest(goal = "") {
       },
       observationAbi: getObservationAbiManifest(),
       verifierAbi: getVerifierAbiManifest(),
+      executionTarget: getExecutionTargetManifest(),
       managedProcessStateMachine: "v1 candidate: observe/wait/interact with durable-record compatibility",
       approvalPolicy: getApprovalPolicyStatus(),
       healthModel: getHealthModelManifest(),
