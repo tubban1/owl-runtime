@@ -25,6 +25,8 @@ import {
   unpinWorkspaceLeaseForProcess,
 } from "../runtime/workspaceLeaseManager.js";
 import { runtimeSessionManager } from "../runtime/runtimeSessionManager.js";
+import { createObservation, type ObservationState } from "../observation/observationAbi.js";
+import { assessManagedProcessState } from "../runtime/processState.js";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const runtimeInstanceId =
@@ -403,6 +405,118 @@ export async function claimRecoveredProcess(processId: string) {
     workspace: record.workspace,
     workspaceLeaseId: record.workspaceLeaseId ?? null,
   };
+}
+
+
+export async function observeProcess(
+  processId: string,
+  tailChars = 20_000,
+) {
+  const record = await reconcileRecord(await readManagedProcess(processId));
+  const [stdout, stderr] = await Promise.all([
+    readLogTail(record.stdoutPath, tailChars),
+    readLogTail(record.stderrPath, tailChars),
+  ]);
+  const stdinAttached = Boolean(
+    liveChildren.get(processId)?.child.stdin?.writable,
+  );
+  const assessment = assessManagedProcessState({
+    record,
+    stdout,
+    stderr,
+    stdinAttached,
+  });
+
+  return createObservation({
+    channel: "process",
+    provider: "managed-process",
+    subject: processId,
+    state: assessment.observationState,
+    data: {
+      processId,
+      pid: record.pid,
+      command: record.command,
+      cwd: record.cwd,
+      runtimeState: assessment.state,
+      durableStatus: record.status,
+      terminal: assessment.terminal,
+      confidence: assessment.confidence,
+      reason: assessment.reason,
+      exitCode: record.exitCode ?? null,
+      signal: record.signal ?? null,
+      inputAvailable: stdinAttached,
+      recoveredAfterRestart: record.recoveredAfterRestart ?? false,
+      stdout,
+      stderr,
+    },
+    evidence: [
+      ...(stdout ? [{ kind: "stdout" as const, ref: record.stdoutPath }] : []),
+      ...(stderr ? [{ kind: "stderr" as const, ref: record.stderrPath }] : []),
+      ...(record.status === "exited"
+        ? [{
+            kind: "exit_code" as const,
+            metadata: { exitCode: record.exitCode ?? null, signal: record.signal ?? null },
+          }]
+        : []),
+    ],
+    metadata: {
+      workspace: record.workspace,
+      workspaceMode: record.workspaceMode,
+      ownerSessionId: record.ownerSessionId,
+      ownerTaskId: record.ownerTaskId ?? null,
+    },
+  });
+}
+
+export async function waitForProcessState(
+  processId: string,
+  options: {
+    states?: ObservationState[];
+    timeoutMs?: number;
+    pollMs?: number;
+    tailChars?: number;
+  } = {},
+) {
+  const targets = new Set<ObservationState>(
+    options.states?.length
+      ? options.states
+      : ["waiting_input", "finished", "failed", "lost"],
+  );
+  const timeoutMs = Math.min(Math.max(Math.trunc(options.timeoutMs ?? 30_000), 0), 60_000);
+  const pollMs = Math.min(Math.max(Math.trunc(options.pollMs ?? 250), 100), 5_000);
+  const deadline = Date.now() + timeoutMs;
+  let observation = await observeProcess(processId, options.tailChars ?? 20_000);
+
+  while (
+    !targets.has(observation.state) &&
+    !["finished", "failed", "lost"].includes(observation.state) &&
+    Date.now() < deadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    observation = await observeProcess(processId, options.tailChars ?? 20_000);
+  }
+
+  return {
+    matched: targets.has(observation.state),
+    timedOut: !targets.has(observation.state) && Date.now() >= deadline,
+    targetStates: [...targets],
+    observation,
+  };
+}
+
+export async function interactWithManagedProcess(
+  processId: string,
+  input: string,
+  options: { timeoutMs?: number; pollMs?: number; tailChars?: number } = {},
+) {
+  const write = await sendProcessInput(processId, input);
+  const waited = await waitForProcessState(processId, {
+    states: ["waiting_input", "finished", "failed", "lost"],
+    timeoutMs: options.timeoutMs ?? 8_000,
+    pollMs: options.pollMs,
+    tailChars: options.tailChars,
+  });
+  return { write, ...waited };
 }
 
 export async function getProcessOutput(

@@ -39,6 +39,7 @@ Contracts intended to remain stable across implementations.
 - [Tasks and staging](runtime/tasks-and-staging.md)
 - [Scheduler and wake](runtime/scheduler-and-wake.md)
 - [Loop controller](runtime/loop-controller.md)
+- [Managed process state machine](runtime/process-state-machine.md)
 - [Memory overview](runtime/memory/overview.md)
 - [Episodic recall](runtime/memory/episodic-recall.md)
 - [Semantic memory](runtime/memory/semantic-memory.md)

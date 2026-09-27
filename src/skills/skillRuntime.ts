@@ -64,7 +64,7 @@ import {
 } from "../runtime/sessionAdapters.js";
 import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
-import { getObservationAbiManifest } from "../observation/observationAbi.js";
+import { getObservationAbiManifest, type ObservationState } from "../observation/observationAbi.js";
 import { getVerifierAbiManifest } from "../verification/verifier.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
@@ -88,7 +88,10 @@ import {
 import {
   claimRecoveredProcess,
   getProcessOutput,
+  interactWithManagedProcess,
   listProcesses,
+  observeProcess,
+  waitForProcessState,
 } from "../tools/shellOps.js";
 import {
   approveWorkspaceHandoff,
@@ -2037,7 +2040,7 @@ const skills: SkillDefinition[] = [
     id: "runtime.process",
     domain: "runtime",
     description:
-      "Inspect durable managed processes and explicitly claim an orphaned process after Runtime restart.",
+      "Observe, wait for, interact with, inspect, and explicitly claim durable managed processes.",
     keywords: [
       "process ownership",
       "managed process",
@@ -2049,9 +2052,13 @@ const skills: SkillDefinition[] = [
     ],
     contract: PROCESS_CONTRACT,
     inputs: {
-      op: "list | status | claim. Default: list.",
-      process_id: "Managed process id for status or claim.",
-      tail_chars: "Optional log tail length for status; default 20000.",
+      op: "list | status | observe | wait | interact | claim. Default: list.",
+      process_id: "Managed process id for status/observe/wait/interact/claim.",
+      tail_chars: "Optional log tail length; default 20000.",
+      states: "For wait: target Observation states; defaults to waiting_input/finished/failed/lost.",
+      timeout_ms: "For wait/interact: bounded wait; max 60000 ms.",
+      poll_ms: "For wait/interact: polling interval; 100-5000 ms.",
+      input: "For interact: text written to the live process stdin.",
     },
     dryRunPlan: (args) => ({
       op: args.op ?? "list",
@@ -2074,12 +2081,45 @@ const skills: SkillDefinition[] = [
           typeof args.tail_chars === "number" ? args.tail_chars : 20_000,
         );
       }
+      if (operation === "observe") {
+        return await observeProcess(
+          processId,
+          typeof args.tail_chars === "number" ? args.tail_chars : 20_000,
+        );
+      }
+      if (operation === "wait") {
+        return await waitForProcessState(processId, {
+          states: Array.isArray(args.states)
+            ? args.states.filter((value): value is ObservationState =>
+                typeof value === "string" &&
+                [
+                  "ready", "running", "waiting_input", "waiting_network",
+                  "terminating", "finished", "failed", "timed_out", "lost", "unknown",
+                ].includes(value),
+              )
+            : undefined,
+          timeoutMs: typeof args.timeout_ms === "number" ? args.timeout_ms : undefined,
+          pollMs: typeof args.poll_ms === "number" ? args.poll_ms : undefined,
+          tailChars: typeof args.tail_chars === "number" ? args.tail_chars : undefined,
+        });
+      }
+      if (operation === "interact") {
+        return await interactWithManagedProcess(
+          processId,
+          requiredText(args, "input"),
+          {
+            timeoutMs: typeof args.timeout_ms === "number" ? args.timeout_ms : undefined,
+            pollMs: typeof args.poll_ms === "number" ? args.poll_ms : undefined,
+            tailChars: typeof args.tail_chars === "number" ? args.tail_chars : undefined,
+          },
+        );
+      }
       if (operation === "claim") {
         return await claimRecoveredProcess(processId);
       }
 
       throw new Error(
-        'runtime.process op must be "list", "status", or "claim".',
+        'runtime.process op must be "list", "status", "observe", "wait", "interact", or "claim".',
       );
     },
   },
@@ -3297,6 +3337,7 @@ export async function getCapabilityManifest(goal = "") {
       },
       observationAbi: getObservationAbiManifest(),
       verifierAbi: getVerifierAbiManifest(),
+      managedProcessStateMachine: "v1 candidate: observe/wait/interact with durable-record compatibility",
       skillAbi: {
         runtimeMetadata: [
           "skillVersion",
