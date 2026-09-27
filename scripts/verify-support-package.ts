@@ -28,6 +28,7 @@ const {
 const {
   appendAudit,
 } = await import("../src/audit.js");
+const { RUNTIME_VERSION } = await import("../src/runtime/runtimeVersion.js");
 
 const client = new InProcessRuntimeClient();
 
@@ -62,7 +63,7 @@ try {
   })) as any;
 
   assert.equal(diagnostics.supportPackageVersion, 1);
-  assert.equal(diagnostics.runtime.version, "0.10.0-dev.0");
+  assert.equal(diagnostics.runtime.version, RUNTIME_VERSION);
   assert.equal(diagnostics.runtime.executionTargets.defaultTarget, "host");
   assert.equal(diagnostics.redaction.rawArgumentsIncluded, false);
   assert.equal(diagnostics.redaction.commandTextIncluded, false);

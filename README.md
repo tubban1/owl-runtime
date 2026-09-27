@@ -4,7 +4,7 @@
 
 OWL Runtime is the runtime extracted from `computer-mcp`. It owns durable execution: Primitive/Skill contracts, persistent tasks, scheduling, concurrency, recovery, providers, policy enforcement, state, and production lifecycle. MCP is now an adapter, not the architecture boundary.
 
-Current extraction line: `0.10.0-dev.0`. The imported Git history preserves the `computer-mcp` evolution, including the `v0.8.0` pre-AgentOS release.
+Current release candidate: `1.0.0-rc.1`. The imported Git history preserves the `computer-mcp` evolution, including the `v0.8.0` pre-AgentOS release.
 
 Repository boundaries: [`docs/architecture/repository-boundaries.md`](docs/architecture/repository-boundaries.md)
 

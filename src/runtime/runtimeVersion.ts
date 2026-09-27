@@ -1,1 +1,1 @@
-export const RUNTIME_VERSION = "0.10.0-dev.0" as const;
+export const RUNTIME_VERSION = "1.0.0-rc.1" as const;
