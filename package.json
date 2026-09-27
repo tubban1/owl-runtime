@@ -46,7 +46,8 @@
     "verify:action-observation": "OWL_RUNTIME_MODE=test tsx scripts/verify-action-observation.ts",
     "verify:browser-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-postconditions.ts",
     "verify:public-runtime-client": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-runtime-client.ts",
-    "build:types": "tsc -p tsconfig.public.json"
+    "build:types": "tsc -p tsconfig.public.json",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
@@ -71,5 +72,9 @@
       "types": "./dist/public/index.d.ts",
       "import": "./dist/public/index.js"
     }
-  }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }
