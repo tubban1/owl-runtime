@@ -5,6 +5,7 @@ This directory is organized by document purpose rather than release chronology.
 ## Start here
 
 - [Repository boundaries](architecture/repository-boundaries.md)
+- [Runtime daemon and MCP adapter boundary](architecture/runtime-daemon-boundary.md)
 - [Architecture overview](architecture/overview.md)
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)

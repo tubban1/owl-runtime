@@ -82,6 +82,18 @@ EOF
   fi
 fi
 
+if ! /usr/bin/grep -q '^OWL_RUNTIME_API_TOKEN=' "$ENV_FILE"; then
+  RUNTIME_API_TOKEN="$("$NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64url"))')"
+  {
+    echo
+    echo "# Local OWL Runtime public API bearer token."
+    echo "OWL_RUNTIME_API_TOKEN=$RUNTIME_API_TOKEN"
+  } >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  unset RUNTIME_API_TOKEN
+  echo "Generated OWL_RUNTIME_API_TOKEN in $ENV_FILE."
+fi
+
 if [[ -e "$RELEASE_DIR" ]]; then
   rm -rf "$RELEASE_DIR"
 fi

@@ -39,6 +39,20 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 2
 fi
 
+RUNTIME_API_TOKEN="$(
+  /bin/zsh -c '
+    set -a
+    source "$1"
+    set +a
+    print -r -- "${OWL_RUNTIME_API_TOKEN:-}"
+  ' _ "$ENV_FILE"
+)"
+if [[ -z "$RUNTIME_API_TOKEN" ]]; then
+  echo "Production environment is missing OWL_RUNTIME_API_TOKEN."
+  echo "Run npm run install:production once with the current Runtime to generate it."
+  exit 2
+fi
+
 if [[ "${ALLOW_DIRTY_PRODUCTION_INSTALL:-false}" != "true" ]]; then
   TRACKED_DIRTY="$(git status --porcelain --untracked-files=no)"
   if [[ -n "$TRACKED_DIRTY" ]]; then
@@ -59,7 +73,7 @@ PRODUCTION_PORT="$(
     print -r -- "${PORT:-8787}"
   ' _ "$ENV_FILE"
 )"
-MCP_URL="http://127.0.0.1:$PRODUCTION_PORT/mcp"
+RUNTIME_URL="http://127.0.0.1:$PRODUCTION_PORT"
 HEALTH_URL="http://127.0.0.1:$PRODUCTION_PORT/health"
 CURRENT_HEALTH="$OWL_HOME/upgrade-current-health.json"
 
@@ -133,7 +147,7 @@ CANDIDATE_PORT="$(
   '
 )"
 CANDIDATE_HEALTH_URL="http://127.0.0.1:$CANDIDATE_PORT/health"
-CANDIDATE_MCP_URL="http://127.0.0.1:$CANDIDATE_PORT/mcp"
+CANDIDATE_RUNTIME_URL="http://127.0.0.1:$CANDIDATE_PORT"
 CANDIDATE_HEALTH="$OWL_HOME/upgrade-candidate-health.json"
 CANDIDATE_STDOUT="$LOG_DIR/candidate-$RELEASE_NAME.stdout.log"
 CANDIDATE_STDERR="$LOG_DIR/candidate-$RELEASE_NAME.stderr.log"
@@ -143,7 +157,7 @@ SWITCHED=false
 
 resume_old_runtime() {
   if [[ "$OLD_DRAINED" == "true" && "$SWITCHED" == "false" ]]; then
-    "$NODE_BIN" "$CONTROL_CLIENT" "$MCP_URL" resume >/dev/null 2>&1 || true
+    /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$CONTROL_CLIENT" "$RUNTIME_URL" resume >/dev/null 2>&1 || true
     OLD_DRAINED=false
   fi
 }
@@ -230,13 +244,13 @@ echo "Candidate preflight healthy. Requesting graceful drain of current Runtime.
 DRAIN_RESULT="$OWL_HOME/upgrade-drain.json"
 WAIT_RESULT="$OWL_HOME/upgrade-wait.json"
 
-if ! "$NODE_BIN" "$CONTROL_CLIENT" "$MCP_URL" drain   "{\"reason\":\"production upgrade to $VERSION\"}" > "$DRAIN_RESULT"; then
+if ! /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$CONTROL_CLIENT" "$RUNTIME_URL" drain   "{\"reason\":\"production upgrade to $VERSION\"}" > "$DRAIN_RESULT"; then
   echo "Current Runtime rejected the drain request."
   exit 1
 fi
 OLD_DRAINED=true
 
-if ! "$NODE_BIN" "$CONTROL_CLIENT" "$MCP_URL" wait   "{\"timeout_ms\":$DRAIN_TIMEOUT_MS}" > "$WAIT_RESULT"; then
+if ! /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$CONTROL_CLIENT" "$RUNTIME_URL" wait   "{\"timeout_ms\":$DRAIN_TIMEOUT_MS}" > "$WAIT_RESULT"; then
   echo "Drain wait call failed. Resuming current Runtime."
   exit 1
 fi
@@ -263,7 +277,7 @@ fi
 
 if [[ "$STATE_MIGRATION_REQUIRED" == "true" ]]; then
   echo "Current Runtime drained. Applying candidate state-schema migration..."
-  if ! "$NODE_BIN" "$STATE_CLIENT" "$CANDIDATE_MCP_URL" migrate     "{\"confirm\":true}" > "$STATE_MIGRATION_RESULT"; then
+  if ! /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$STATE_CLIENT" "$CANDIDATE_RUNTIME_URL" migrate     "{\"confirm\":true}" > "$STATE_MIGRATION_RESULT"; then
     echo "Candidate state-schema migration failed. Current Runtime will be resumed."
     exit 1
   fi

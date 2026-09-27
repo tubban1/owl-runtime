@@ -1,1 +1,1 @@
-import "./adapters/mcp/server.js";
+import "./daemon/server.js";

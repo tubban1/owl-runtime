@@ -127,8 +127,18 @@ try {
   assert.equal(health.runtime?.stateSchema?.readable, true);
   assert.equal(health.runtime?.stateSchema?.migrationRequired, true);
 
-  assert.match(stdout, /OWL Runtime .* MCP adapter listening/);
+  assert.match(stdout, /OWL Runtime .* daemon listening/);
+  assert.doesNotMatch(stdout, /MCP adapter listening/);
   assert.doesNotMatch(stdout, /tsx watch/);
+
+  const mcpProbe = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    signal: AbortSignal.timeout(1_000),
+  });
+  assert.equal(
+    mcpProbe.status,
+    404,
+    "Production OWL Runtime daemon must not require or expose the transitional MCP adapter.",
+  );
 
   console.log(
     JSON.stringify(

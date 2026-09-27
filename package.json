@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "PORT=${PORT:-8788} OWL_RUNTIME_MODE=development OWL_STATE_ROOT=${AGENTOS_STATE_ROOT:-$HOME/.owl-runtime-dev} tsx watch src/server.ts",
+    "dev:mcp": "PORT=${PORT:-8789} OWL_RUNTIME_MODE=development OWL_STATE_ROOT=${AGENTOS_STATE_ROOT:-$HOME/.owl-runtime-dev} tsx watch src/mcp-server.ts",
     "dev:isolated": "npm run dev",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.public.json",
     "start": "OWL_RUNTIME_MODE=production node dist/server.js",
+    "start:mcp": "OWL_RUNTIME_MODE=production node dist/mcp-server.js",
     "start:source": "PORT=${PORT:-8788} OWL_RUNTIME_MODE=development OWL_STATE_ROOT=${AGENTOS_STATE_ROOT:-$HOME/.owl-runtime-dev} tsx src/server.ts",
+    "start:mcp:source": "PORT=${PORT:-8789} OWL_RUNTIME_MODE=development OWL_STATE_ROOT=${AGENTOS_STATE_ROOT:-$HOME/.owl-runtime-dev} tsx src/mcp-server.ts",
     "typecheck": "tsc --noEmit",
     "verify:isa": "OWL_RUNTIME_MODE=test tsx scripts/verify-primitive-isa.ts",
     "verify:skill-abi": "OWL_RUNTIME_MODE=test tsx scripts/verify-skill-abi.ts",

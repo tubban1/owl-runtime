@@ -16,6 +16,7 @@ const stateClient = path.join(root, "scripts", "runtime-state-client.mjs");
 const packageJson = JSON.parse(
   await fs.readFile(path.join(root, "package.json"), "utf8"),
 ) as { version: string };
+const runtimeApiToken = "verify-upgrade-runtime-token";
 
 await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(scratch, { recursive: true });
@@ -116,6 +117,7 @@ function startRuntime(port: number, candidate: boolean) {
         OWL_RUNTIME_MODE: "production",
         OWL_STATE_ROOT: stateRoot,
         OWL_CANDIDATE_MODE: candidate ? "true" : "false",
+        OWL_RUNTIME_API_TOKEN: runtimeApiToken,
         AUDIT_LOG_ENABLED: "false",
         PROCESS_MONITOR_POLL_MS: "60000",
         SCHEDULER_POLL_MS: "60000",
@@ -159,7 +161,7 @@ async function callRuntimeClient(
     process.execPath,
     [
       clientPath,
-      `http://127.0.0.1:${port}/mcp`,
+      `http://127.0.0.1:${port}`,
       op,
       JSON.stringify(args),
     ],
@@ -167,6 +169,10 @@ async function callRuntimeClient(
       cwd: root,
       timeout: 30_000,
       maxBuffer: 4 * 1024 * 1024,
+      env: {
+        ...process.env,
+        OWL_RUNTIME_API_TOKEN: runtimeApiToken,
+      },
     },
   );
   if (stderr.trim()) {
@@ -329,7 +335,7 @@ try {
           backgroundControllersStarted: false,
           compatibilityHealth: true,
         },
-        mcpDrainControl: true,
+        publicRuntimeDrainControl: true,
         drainWait: true,
         candidateStateMigration: true,
         stateMigrationBeforeCutover: true,
