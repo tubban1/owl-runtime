@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -57,20 +58,47 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+function newProcessControlToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function hashProcessControlToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function processControlTokenMatches(
+  record: ManagedProcessRecord,
+  controlToken?: string,
+): boolean {
+  if (!controlToken || !record.controlTokenHash) return false;
+  const expected = Buffer.from(record.controlTokenHash, "hex");
+  const actual = Buffer.from(hashProcessControlToken(controlToken), "hex");
+  return (
+    expected.length === actual.length &&
+    expected.length > 0 &&
+    timingSafeEqual(expected, actual)
+  );
+}
+
 function processOwnerMatches(
   record: ManagedProcessRecord,
   context: ExecutionContext = currentExecutionContext(),
+  controlToken?: string,
 ): boolean {
+  if (processControlTokenMatches(record, controlToken)) return true;
   if (record.ownerTaskId && context.taskId === record.ownerTaskId) return true;
   if (record.ownerSessionId === context.sessionId) return true;
   return context.origin === "system" && context.sessionId === "runtime:system";
 }
 
-function assertProcessOwner(record: ManagedProcessRecord) {
+function assertProcessOwner(
+  record: ManagedProcessRecord,
+  controlToken?: string,
+) {
   const context = currentExecutionContext();
-  if (processOwnerMatches(record, context)) return;
+  if (processOwnerMatches(record, context, controlToken)) return;
   throw new Error(
-    `PROCESS_OWNED: ${record.processId} belongs to ${record.ownerTaskId ? `task:${record.ownerTaskId}` : `session:${record.ownerSessionId}`} and cannot be controlled by session:${context.sessionId}.`,
+    `PROCESS_OWNED: ${record.processId} belongs to ${record.ownerTaskId ? `task:${record.ownerTaskId}` : `session:${record.ownerSessionId}`} and cannot be controlled by session:${context.sessionId} without the process control capability.`,
   );
 }
 
@@ -208,6 +236,7 @@ export async function startProcess(
   const safeCwd = await assertAllowedExistingPath(cwd);
   const workspace = await resolveWorkspace(safeCwd);
   const processId = newManagedProcessId();
+  const controlToken = newProcessControlToken();
   const context = currentExecutionContext();
 
   const leaseContext =
@@ -264,6 +293,7 @@ export async function startProcess(
     ...(workspaceLeaseId ? { workspaceLeaseId } : {}),
     ownerSessionId: context.sessionId,
     ...(context.taskId ? { ownerTaskId: context.taskId } : {}),
+    controlTokenHash: hashProcessControlToken(controlToken),
     startedAt: now,
     updatedAt: now,
     status: "running",
@@ -314,6 +344,7 @@ export async function startProcess(
     workspaceLeaseId: record.workspaceLeaseId ?? null,
     ownerSessionId: record.ownerSessionId,
     ownerTaskId: record.ownerTaskId ?? null,
+    controlToken,
     stdoutPath: record.stdoutPath,
     stderrPath: record.stderrPath,
     durable: true,
@@ -343,10 +374,14 @@ export async function listProcesses() {
   }));
 }
 
-export async function sendProcessInput(processId: string, input: string) {
+export async function sendProcessInput(
+  processId: string,
+  input: string,
+  controlToken?: string,
+) {
   requireCapability("ALLOW_SHELL", false);
   const record = await reconcileRecord(await readManagedProcess(processId));
-  assertProcessOwner(record);
+  assertProcessOwner(record, controlToken);
 
   if (record.status !== "running") {
     throw new Error("Process is not running.");
@@ -366,7 +401,10 @@ export async function sendProcessInput(processId: string, input: string) {
   };
 }
 
-export async function claimRecoveredProcess(processId: string) {
+export async function claimRecoveredProcess(
+  processId: string,
+  controlToken?: string,
+) {
   const record = await reconcileRecord(await readManagedProcess(processId));
   if (
     record.status !== "running" &&
@@ -383,9 +421,14 @@ export async function claimRecoveredProcess(processId: string) {
   const orphanedByRestart =
     Boolean(record.recoveredAfterRestart) && !liveChildren.has(processId);
 
-  if (!orphanedByRestart && !ownerDisconnected) {
+  const capabilityAuthorized = processControlTokenMatches(
+    record,
+    controlToken,
+  );
+
+  if (!orphanedByRestart && !ownerDisconnected && !capabilityAuthorized) {
     throw new Error(
-      "PROCESS_NOT_ORPHANED: claim requires either a Runtime-recovered process or a disconnected original MCP transport session.",
+      "PROCESS_NOT_ORPHANED: claim requires a Runtime-recovered process, a disconnected original transport session, or the process control capability.",
     );
   }
 
@@ -507,9 +550,18 @@ export async function waitForProcessState(
 export async function interactWithManagedProcess(
   processId: string,
   input: string,
-  options: { timeoutMs?: number; pollMs?: number; tailChars?: number } = {},
+  options: {
+    timeoutMs?: number;
+    pollMs?: number;
+    tailChars?: number;
+    controlToken?: string;
+  } = {},
 ) {
-  const write = await sendProcessInput(processId, input);
+  const write = await sendProcessInput(
+    processId,
+    input,
+    options.controlToken,
+  );
   const waited = await waitForProcessState(processId, {
     states: ["waiting_input", "finished", "failed", "lost"],
     timeoutMs: options.timeoutMs ?? 8_000,
@@ -542,10 +594,11 @@ export async function getProcessOutput(
 export async function killProcess(
   processId: string,
   signal: NodeJS.Signals = "SIGTERM",
+  controlToken?: string,
 ) {
   requireCapability("ALLOW_SHELL", false);
   const record = await reconcileRecord(await readManagedProcess(processId));
-  assertProcessOwner(record);
+  assertProcessOwner(record, controlToken);
 
   if (record.status !== "running" && record.status !== "terminating") {
     return {

@@ -47,7 +47,9 @@
     "verify:browser-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-postconditions.ts",
     "verify:public-runtime-client": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-runtime-client.ts",
     "build:types": "tsc -p tsconfig.public.json",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "verify:http-runtime-client": "OWL_RUNTIME_MODE=test tsx scripts/verify-http-runtime-client.ts",
+    "verify:process-control": "OWL_RUNTIME_MODE=test tsx scripts/verify-process-control-capability.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

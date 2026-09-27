@@ -40,6 +40,7 @@ const sensitiveKeys = new Set([
   "url",
   "result",
   "manual_result",
+  "control_token",
   "steps",
   "args",
 ]);

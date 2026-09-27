@@ -2224,11 +2224,13 @@ const skills: SkillDefinition[] = [
       timeout_ms: "For wait/interact: bounded wait; max 60000 ms.",
       poll_ms: "For wait/interact: polling interval; 100-5000 ms.",
       input: "For interact: text written to the live process stdin.",
+      control_token: "Optional process-scoped control capability returned by startProcess; allows safe control after transport/session reconnect.",
     },
     dryRunPlan: (args) => ({
       op: args.op ?? "list",
       processId: args.process_id ?? null,
-      claimRequiresRecoveredOrphan: true,
+      claimRequiresRecoveredOrphanOrCapability: true,
+      processControlCapabilityAccepted: true,
       implicitTakeover: false,
     }),
     run: async (args) => {
@@ -2276,11 +2278,20 @@ const skills: SkillDefinition[] = [
             timeoutMs: typeof args.timeout_ms === "number" ? args.timeout_ms : undefined,
             pollMs: typeof args.poll_ms === "number" ? args.poll_ms : undefined,
             tailChars: typeof args.tail_chars === "number" ? args.tail_chars : undefined,
+            controlToken:
+              typeof args.control_token === "string"
+                ? args.control_token
+                : undefined,
           },
         );
       }
       if (operation === "claim") {
-        return await claimRecoveredProcess(processId);
+        return await claimRecoveredProcess(
+          processId,
+          typeof args.control_token === "string"
+            ? args.control_token
+            : undefined,
+        );
       }
 
       throw new Error(

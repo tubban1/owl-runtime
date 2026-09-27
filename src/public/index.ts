@@ -21,3 +21,15 @@ export {
   type HealthRequest,
   type ProcessRequest,
 } from "./runtimeClient.js";
+
+export {
+  HttpRuntimeClient,
+  RuntimeRpcError,
+  type HttpRuntimeClientOptions,
+} from "./httpRuntimeClient.js";
+
+export {
+  RUNTIME_RPC_METHODS,
+  invokeRuntimeRpc,
+  type RuntimeRpcMethod,
+} from "./runtimeRpc.js";

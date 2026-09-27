@@ -27,6 +27,8 @@ export type ManagedProcessRecord = {
   workspaceLeaseId?: string;
   ownerSessionId: string;
   ownerTaskId?: string;
+  /** SHA-256 of the process-scoped control capability; raw token is never persisted. */
+  controlTokenHash?: string;
   startedAt: string;
   updatedAt: string;
   status: ManagedProcessStatus;

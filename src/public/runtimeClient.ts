@@ -176,8 +176,9 @@ export type ProcessRequest =
       timeout_ms?: number;
       poll_ms?: number;
       tail_chars?: number;
+      control_token?: string;
     }
-  | { op: "claim"; process_id: string };
+  | { op: "claim"; process_id: string; control_token?: string };
 
 export interface RuntimeClient {
   info(): Promise<RuntimeClientInfo>;

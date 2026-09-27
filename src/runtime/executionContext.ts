@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 export type ExecutionOrigin =
   | "mcp"
+  | "api"
   | "task"
   | "scheduler"
   | "loop"

@@ -106,11 +106,31 @@ v0.1 intentionally does not define MCP as the Runtime transport.
 consumer
   ↓
 RuntimeClient
-  ├─ in-process reference
-  ├─ local IPC      (planned)
-  ├─ local HTTP     (possible)
-  └─ mock           (Worker development)
+  ├─ InProcessRuntimeClient  ← reference/conformance
+  ├─ HttpRuntimeClient       ← candidate local cross-process transport
+  ├─ local IPC               ← future option
+  └─ MockRuntimeClient       ← Worker development
 ```
+
+The Runtime daemon exposes:
+
+- `GET /runtime/v0.1/info`
+- `POST /runtime/v0.1/rpc`
+
+RPC calls require `x-owl-session-id`. This value is a **logical consumer session identity**, not an HTTP connection id and not an MCP transport id. A consumer must keep it stable across reconnects if it expects to retain ownership of processes/workspaces created by that logical session.
+
+`x-owl-request-id` is optional and identifies one request only.
+
+If `OWL_RUNTIME_API_TOKEN` is configured, callers must send the matching Bearer token. The production listener remains bound to loopback by default.
+
+The HTTP conformance test proves:
+- stable logical identity across separate requests;
+- same-session process control survives request boundaries;
+- a different logical session is rejected with `PROCESS_OWNED`;
+- File Observation + Verification receipts survive the transport boundary;
+- missing logical session identity is rejected.
+
+**Cancellation is not declared ready yet.** A client-side/transport timeout must not be interpreted as proof that Runtime execution was cancelled. Cancellation propagation and orphan cleanup remain P0 before heavy multi-session migration.
 
 MCP remains a consumer/adapter concern.
 

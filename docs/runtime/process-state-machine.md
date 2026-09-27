@@ -35,3 +35,18 @@ The existing `runtime.process` Skill now supports:
 `waiting_input` is a heuristic state. It requires a live stdin attachment and a recognized recent prompt pattern. The Observation records `confidence=heuristic`. Exit/failure/lost states are deterministic.
 
 `waiting_network` remains reserved in Observation ABI for providers that can supply reliable network-wait evidence; the shell runtime does not guess it from silence.
+
+## Process control capability
+
+A managed process now receives a random process-scoped control capability when it is started. The raw token is returned only to the caller; Runtime persists only its SHA-256 hash and redacts `control_token` from audit payloads.
+
+Normal control still follows logical session/task ownership. The capability exists for a narrower recovery case: a trusted consumer reconnects with a different transport/session identity but still holds the process-scoped capability.
+
+With the valid capability, the consumer may:
+- send process input;
+- terminate the process;
+- explicitly claim/rebind ownership.
+
+Without ownership or the capability, Runtime returns `PROCESS_OWNED`.
+
+This avoids the unsafe alternative of globally weakening process ownership after transport reconnects. Legacy process records without a capability hash remain readable and continue to use the prior ownership/recovery rules.

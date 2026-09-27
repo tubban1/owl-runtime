@@ -1,0 +1,209 @@
+import { randomUUID } from "node:crypto";
+import {
+  RUNTIME_PUBLIC_API_VERSION,
+  type ApprovalState,
+  type CreateScheduleRequest,
+  type CreateTaskRequest,
+  type HealthRequest,
+  type PrimitiveCallRequest,
+  type ProcessRequest,
+  type ResolveTaskStepRequest,
+  type RunTaskRequest,
+  type RuntimeClient,
+  type RuntimeClientInfo,
+  type SkillRunRequest,
+} from "./runtimeClient.js";
+import type { RuntimeRpcMethod } from "./runtimeRpc.js";
+
+type RpcSuccess = {
+  ok: true;
+  apiVersion: string;
+  requestId: string;
+  rpcId: string | null;
+  result: unknown;
+};
+
+type RpcFailure = {
+  ok: false;
+  apiVersion: string;
+  requestId?: string;
+  error: {
+    code: string;
+    message: string;
+  };
+};
+
+export class RuntimeRpcError extends Error {
+  readonly code: string;
+  readonly requestId?: string;
+
+  constructor(error: RpcFailure) {
+    super(error.error.message);
+    this.name = "RuntimeRpcError";
+    this.code = error.error.code;
+    this.requestId = error.requestId;
+  }
+}
+
+export type HttpRuntimeClientOptions = {
+  baseUrl: string;
+  sessionId: string;
+  token?: string;
+  userAgent?: string;
+};
+
+export class HttpRuntimeClient implements RuntimeClient {
+  private readonly baseUrl: string;
+  private readonly sessionId: string;
+  private readonly token?: string;
+  private readonly userAgent: string;
+
+  constructor(options: HttpRuntimeClientOptions) {
+    const sessionId = options.sessionId.trim();
+    if (!sessionId) {
+      throw new Error("HttpRuntimeClient requires a stable logical sessionId.");
+    }
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.sessionId = sessionId;
+    this.token = options.token;
+    this.userAgent = options.userAgent ?? "owl-runtime-client/0.1";
+  }
+
+  private async rpc(method: RuntimeRpcMethod, params?: unknown): Promise<unknown> {
+    const requestId =
+      `client:${Date.now().toString(36)}:${randomUUID()}`;
+    const response = await fetch(`${this.baseUrl}/runtime/v0.1/rpc`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": this.userAgent,
+        "x-owl-session-id": this.sessionId,
+        "x-owl-request-id": requestId,
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: JSON.stringify({
+        id: requestId,
+        method,
+        ...(params === undefined ? {} : { params }),
+      }),
+    });
+
+    const payload = (await response.json()) as RpcSuccess | RpcFailure;
+    if (!response.ok || payload.ok !== true) {
+      throw new RuntimeRpcError(
+        payload.ok === false
+          ? payload
+          : {
+              ok: false,
+              apiVersion: RUNTIME_PUBLIC_API_VERSION,
+              requestId,
+              error: {
+                code: `HTTP_${response.status}`,
+                message: `OWL Runtime HTTP ${response.status}`,
+              },
+            },
+      );
+    }
+    return payload.result;
+  }
+
+  async info(): Promise<RuntimeClientInfo> {
+    return (await this.rpc("info")) as RuntimeClientInfo;
+  }
+
+  async getCapabilities(goal = ""): Promise<unknown> {
+    return await this.rpc("capabilities.get", { goal });
+  }
+
+  async getPrimitiveCatalog(): Promise<unknown> {
+    return await this.rpc("primitives.catalog");
+  }
+
+  async callPrimitive(request: PrimitiveCallRequest): Promise<unknown> {
+    return await this.rpc("primitive.call", request);
+  }
+
+  async getSkillCatalog(): Promise<unknown> {
+    return await this.rpc("skills.catalog");
+  }
+
+  async runSkill(request: SkillRunRequest): Promise<unknown> {
+    return await this.rpc("skill.run", request);
+  }
+
+  async createTask(request: CreateTaskRequest): Promise<unknown> {
+    return await this.rpc("tasks.create", request);
+  }
+
+  async listTasks(): Promise<unknown> {
+    return await this.rpc("tasks.list");
+  }
+
+  async getTask(taskId: string, includeResults = false): Promise<unknown> {
+    return await this.rpc("tasks.get", { taskId, includeResults });
+  }
+
+  async runTask(request: RunTaskRequest): Promise<unknown> {
+    return await this.rpc("tasks.run", request);
+  }
+
+  async pauseTask(taskId: string): Promise<unknown> {
+    return await this.rpc("tasks.pause", { taskId });
+  }
+
+  async cancelTask(taskId: string): Promise<unknown> {
+    return await this.rpc("tasks.cancel", { taskId });
+  }
+
+  async resolveTaskStep(request: ResolveTaskStepRequest): Promise<unknown> {
+    return await this.rpc("tasks.resolve", request);
+  }
+
+  async deleteTask(taskId: string): Promise<unknown> {
+    return await this.rpc("tasks.delete", { taskId });
+  }
+
+  async createSchedule(request: CreateScheduleRequest): Promise<unknown> {
+    return await this.rpc("schedules.create", request);
+  }
+
+  async listSchedules(): Promise<unknown> {
+    return await this.rpc("schedules.list");
+  }
+
+  async getSchedule(scheduleId: string): Promise<unknown> {
+    return await this.rpc("schedules.get", { scheduleId });
+  }
+
+  async cancelSchedule(scheduleId: string): Promise<unknown> {
+    return await this.rpc("schedules.cancel", { scheduleId });
+  }
+
+  async deleteSchedule(scheduleId: string): Promise<unknown> {
+    return await this.rpc("schedules.delete", { scheduleId });
+  }
+
+  async listApprovals(state?: ApprovalState): Promise<unknown> {
+    return await this.rpc("approvals.list", state ? { state } : {});
+  }
+
+  async getApproval(approvalId: string): Promise<unknown> {
+    return await this.rpc("approvals.get", { approvalId });
+  }
+
+  async approve(approvalId: string, confirm: boolean): Promise<unknown> {
+    return await this.rpc("approvals.approve", { approvalId, confirm });
+  }
+
+  async deny(approvalId: string, confirm: boolean): Promise<unknown> {
+    return await this.rpc("approvals.deny", { approvalId, confirm });
+  }
+
+  async process(request: ProcessRequest): Promise<unknown> {
+    return await this.rpc("process", request);
+  }
+
+  async health(request: HealthRequest = { op: "status" }): Promise<unknown> {
+    return await this.rpc("health", request);
+  }
+}

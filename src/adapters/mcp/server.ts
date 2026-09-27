@@ -107,6 +107,7 @@ import {
 } from "../../runtime/stateSchema.js";
 import { releaseWorkspaceLeasesForSession } from "../../runtime/workspaceLeaseManager.js";
 import { RUNTIME_VERSION } from "../../runtime/runtimeVersion.js";
+import { registerRuntimeHttpApi } from "../../public/httpRuntimeApi.js";
 
 type ToolAuditContext = {
   tool: string;
@@ -614,6 +615,7 @@ function createServer() {
     {
       process_id: z.string(),
       input: z.string(),
+      control_token: z.string().min(20).optional(),
     },
     {
       title: "Send Process Input",
@@ -622,9 +624,17 @@ function createServer() {
       idempotentHint: false,
       openWorldHint: true,
     },
-    async ({ process_id, input }) => {
+    async ({ process_id, input, control_token }) => {
       try {
-        return ok((await executeRoutedAction("shell.input", { process_id, input })).result);
+        return ok(
+          (
+            await executeRoutedAction("shell.input", {
+              process_id,
+              input,
+              control_token,
+            })
+          ).result,
+        );
       } catch (error) {
         return fail(error);
       }
@@ -660,6 +670,7 @@ function createServer() {
     {
       process_id: z.string(),
       signal: z.enum(["SIGTERM", "SIGKILL", "SIGINT"]).optional(),
+      control_token: z.string().min(20).optional(),
     },
     {
       title: "Kill Process",
@@ -668,9 +679,17 @@ function createServer() {
       idempotentHint: false,
       openWorldHint: false,
     },
-    async ({ process_id, signal }) => {
+    async ({ process_id, signal, control_token }) => {
       try {
-        return ok((await executeRoutedAction("shell.kill", { process_id, signal: signal ?? "SIGTERM" })).result);
+        return ok(
+          (
+            await executeRoutedAction("shell.kill", {
+              process_id,
+              signal: signal ?? "SIGTERM",
+              control_token,
+            })
+          ).result,
+        );
       } catch (error) {
         return fail(error);
       }
@@ -998,6 +1017,7 @@ function createServer() {
       managedProcessStateMachine: true,
       approvalReceipts: true,
       executionHealthModel: true,
+      publicRuntimeApiV01: true,
           skillRuntime: true,
           skillAbi: true,
           resourceArbiter: true,
@@ -2104,6 +2124,7 @@ function createServer() {
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));
+registerRuntimeHttpApi(app);
 
 const candidateMode = runtimeCandidateMode();
 await assertStateSchemaReadable();
