@@ -12,6 +12,7 @@ import { resourceArbiter } from "../runtime/resourceArbiter.js";
 import { getProviderStatuses } from "../providers/registry.js";
 import {
   createPersistentPrimitiveTask,
+  getPersistentTaskStatus,
   type PrimitiveTaskStep,
 } from "../tasks/taskRuntime.js";
 import {
@@ -74,6 +75,12 @@ import {
   listApprovals,
   readApproval,
 } from "../policy/approvalPolicy.js";
+import {
+  approvalHealth,
+  getHealthModelManifest,
+  processHealth,
+  taskHealth,
+} from "../health/healthModel.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
   getStateMigrationRegistry,
@@ -281,6 +288,18 @@ const SKILL_RUNTIME_METADATA: Record<string, SkillRuntimeMetadata> = {
     },
   },
   "runtime.workspace": {
+    skillVersion: "0.1.0",
+    requiredPrimitiveAbi: 1,
+    requiredPrimitives: [],
+    executionMode: "inline",
+    memoryPolicy: {
+      working: "runtime",
+      staging: "available_when_durable",
+      episodic: "task_events_when_durable",
+      semanticPromotion: "manual",
+    },
+  },
+  "runtime.health": {
     skillVersion: "0.1.0",
     requiredPrimitiveAbi: 1,
     requiredPrimitives: [],
@@ -509,6 +528,7 @@ function skillIsReadOnlyForLifecycle(
 ): boolean {
   const operation = skillOperation(args);
   if (skillId === "runtime.control") return true;
+  if (skillId === "runtime.health") return true;
   if (
     skillId === "runtime.state" &&
     ["status", "plan"].includes(operation || "status")
@@ -553,6 +573,7 @@ function skillAllowedDuringDrain(
   args: JsonObject,
 ): boolean {
   if (skillId === "runtime.control") return true;
+  if (skillId === "runtime.health") return true;
   const operation = skillOperation(args);
   if (skillId === "runtime.state") return true;
   if (
@@ -1046,6 +1067,15 @@ const PROCESS_CONTRACT: SkillContract = {
   sideEffects: ["process_ownership_claim_when_requested"],
   requiresVerification: true,
   retryPolicy: "manual",
+  resources: [],
+};
+
+const HEALTH_CONTRACT: SkillContract = {
+  riskLevel: "low",
+  idempotent: true,
+  sideEffects: [],
+  requiresVerification: false,
+  retryPolicy: "automatic",
   resources: [],
 };
 
@@ -2070,6 +2100,40 @@ const skills: SkillDefinition[] = [
       throw new Error(
         'runtime.workspace op must be "status", "list", "wait", "acquire", "renew", "release", "request_takeover", "handoff", "takeover", "list_handoffs", "handoff_status", or "cancel_takeover".',
       );
+    },
+  },
+  {
+    id: "runtime.health",
+    domain: "runtime",
+    description:
+      "Return stable health signals for a Persistent Task, managed process, or approval request for Worker-facing status UX.",
+    keywords: ["health", "worker health", "task health", "process health", "健康状态", "运行健康"],
+    contract: HEALTH_CONTRACT,
+    inputs: {
+      op: "status | task | process | approval. Default: status.",
+      task_id: "Persistent Task id for op=task.",
+      process_id: "Managed process id for op=process.",
+      approval_id: "Approval id for op=approval.",
+      tail_chars: "Optional process observation log tail length.",
+    },
+    dryRunPlan: (args) => ({ op: args.op ?? "status", sourceId: args.task_id ?? args.process_id ?? args.approval_id ?? null }),
+    run: async (args) => {
+      const operation = typeof args.op === "string" ? args.op.trim().toLowerCase() : "status";
+      if (operation === "status") return getHealthModelManifest();
+      if (operation === "task") {
+        const task = await getPersistentTaskStatus(requiredText(args, "task_id"), false);
+        return taskHealth({ id: task.id, status: task.status, label: task.label });
+      }
+      if (operation === "process") {
+        return processHealth(await observeProcess(
+          requiredText(args, "process_id"),
+          typeof args.tail_chars === "number" ? args.tail_chars : 20_000,
+        ));
+      }
+      if (operation === "approval") {
+        return approvalHealth(await readApproval(requiredText(args, "approval_id")));
+      }
+      throw new Error('runtime.health op must be "status", "task", "process", or "approval".');
     },
   },
   {
@@ -3411,6 +3475,7 @@ export async function getCapabilityManifest(goal = "") {
       verifierAbi: getVerifierAbiManifest(),
       managedProcessStateMachine: "v1 candidate: observe/wait/interact with durable-record compatibility",
       approvalPolicy: getApprovalPolicyStatus(),
+      healthModel: getHealthModelManifest(),
       skillAbi: {
         runtimeMetadata: [
           "skillVersion",
