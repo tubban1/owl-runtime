@@ -63,6 +63,7 @@ The reference implementation is `InProcessRuntimeClient`. IPC/HTTP/native implem
 ### Runtime state
 - `process(...)`
 - `health(...)`
+- `getDiagnostics(...)`
 
 ## Public input contracts
 

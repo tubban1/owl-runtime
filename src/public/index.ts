@@ -19,6 +19,7 @@ export {
   type PublicScheduleStopWhen,
   type CreateScheduleRequest,
   type ApprovalState,
+  type DiagnosticsRequest,
   type HealthRequest,
   type ProcessRequest,
 } from "./runtimeClient.js";

@@ -119,6 +119,16 @@ try {
   })) as any;
   assert.ok(healthAfterCrossTransportControl.result);
 
+  const executionTargets = (await client.getExecutionTargets()) as any;
+  assert.equal(executionTargets.defaultTarget, "host");
+  assert.equal(executionTargets.silentFallback, false);
+
+  const diagnostics = (await client.getDiagnostics({
+    auditLimit: 0,
+  })) as any;
+  assert.equal(diagnostics.supportPackageVersion, 1);
+  assert.equal(diagnostics.redaction.rawArgumentsIncluded, false);
+
   const session = runtimeSessionManager.status(sessionId);
   assert.ok(session);
   assert.ok((session?.totalCalls ?? 0) >= 5);
@@ -161,6 +171,8 @@ try {
     crossSessionProcessOwnershipRejectedWithoutCapability: true,
     crossSessionProcessCapabilityAccepted: true,
     fileObservationAndVerificationOverHttp: true,
+    executionTargetManifestOverHttp: true,
+    diagnosticsOverHttp: true,
     missingLogicalSessionRejected: true,
     productionBearerTokenRequired: true,
     callsObservedForSession: session?.totalCalls ?? 0,

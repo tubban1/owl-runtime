@@ -31,6 +31,7 @@ import {
   readApproval,
 } from "../policy/approvalPolicy.js";
 import { RUNTIME_VERSION } from "../runtime/runtimeVersion.js";
+import { createSupportPackage } from "../diagnostics/supportPackage.js";
 import { withChildExecutionContext } from "../runtime/executionContext.js";
 import {
   assertExecutionTargetAvailable,
@@ -166,6 +167,10 @@ export type ApprovalState =
   | "denied"
   | "expired";
 
+export type DiagnosticsRequest = {
+  auditLimit?: number;
+};
+
 export type HealthRequest =
   | { op?: "status" }
   | { op: "task"; task_id: string }
@@ -240,6 +245,7 @@ export interface RuntimeClient {
 
   process(request: ProcessRequest): Promise<unknown>;
   health(request?: HealthRequest): Promise<unknown>;
+  getDiagnostics(request?: DiagnosticsRequest): Promise<unknown>;
 }
 
 /**
@@ -424,5 +430,11 @@ export class InProcessRuntimeClient implements RuntimeClient {
       request as Record<string, unknown>,
       false,
     );
+  }
+
+  async getDiagnostics(
+    request: DiagnosticsRequest = {},
+  ): Promise<unknown> {
+    return await createSupportPackage(request);
   }
 }

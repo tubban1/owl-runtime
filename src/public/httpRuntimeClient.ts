@@ -265,4 +265,8 @@ export class HttpRuntimeClient implements RuntimeClient {
   async health(request: HealthRequest = { op: "status" }): Promise<unknown> {
     return await this.rpc("health", request);
   }
+
+  async getDiagnostics(request: { auditLimit?: number } = {}): Promise<unknown> {
+    return await this.rpc("diagnostics.get", request);
+  }
 }

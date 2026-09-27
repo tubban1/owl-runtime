@@ -38,6 +38,7 @@ export const RUNTIME_RPC_METHODS = [
   "approvals.deny",
   "process",
   "health",
+  "diagnostics.get",
 ] as const;
 
 export type RuntimeRpcMethod = (typeof RUNTIME_RPC_METHODS)[number];
@@ -143,5 +144,7 @@ export async function invokeRuntimeRpc(
       return await client.process(object as ProcessRequest);
     case "health":
       return await client.health(object as HealthRequest);
+    case "diagnostics.get":
+      return await client.getDiagnostics(object);
   }
 }

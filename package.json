@@ -54,7 +54,8 @@
     "verify:http-runtime-client": "OWL_RUNTIME_MODE=test tsx scripts/verify-http-runtime-client.ts",
     "verify:process-control": "OWL_RUNTIME_MODE=test tsx scripts/verify-process-control-capability.ts",
     "verify:request-cancellation": "OWL_RUNTIME_MODE=test tsx scripts/verify-request-cancellation.ts",
-    "verify:execution-target": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-target.ts"
+    "verify:execution-target": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-target.ts",
+    "verify:support-package": "OWL_RUNTIME_MODE=test tsx scripts/verify-support-package.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

@@ -58,6 +58,7 @@ app.get("/health", async (_req, res) => {
     capabilities: {
       publicRuntimeApiV01: true,
       executionTargetContract: true,
+      diagnosticSupportPackage: true,
       requestCancellation: true,
       processControlCapabilities: true,
       persistentTasks: true,

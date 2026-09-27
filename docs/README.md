@@ -44,6 +44,7 @@ Contracts intended to remain stable across implementations.
 - [Loop controller](runtime/loop-controller.md)
 - [Managed process state machine](runtime/process-state-machine.md)
 - [Execution health model](runtime/health-model.md)
+- [Diagnostic support package](runtime/support-package.md)
 - [Memory overview](runtime/memory/overview.md)
 - [Episodic recall](runtime/memory/episodic-recall.md)
 - [Semantic memory](runtime/memory/semantic-memory.md)
