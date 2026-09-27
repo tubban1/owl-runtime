@@ -113,9 +113,9 @@ function startRuntime(port: number, candidate: boolean) {
       env: {
         ...process.env,
         PORT: String(port),
-        AGENTOS_RUNTIME_MODE: "production",
-        AGENTOS_STATE_ROOT: stateRoot,
-        AGENTOS_CANDIDATE_MODE: candidate ? "true" : "false",
+        OWL_RUNTIME_MODE: "production",
+        OWL_STATE_ROOT: stateRoot,
+        OWL_CANDIDATE_MODE: candidate ? "true" : "false",
         AUDIT_LOG_ENABLED: "false",
         PROCESS_MONITOR_POLL_MS: "60000",
         SCHEDULER_POLL_MS: "60000",

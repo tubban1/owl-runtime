@@ -1,9 +1,10 @@
-# AgentOS Runtime Documentation
+# OWL Runtime Documentation
 
 This directory is organized by document purpose rather than release chronology.
 
 ## Start here
 
+- [Repository boundaries](architecture/repository-boundaries.md)
 - [Architecture overview](architecture/overview.md)
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
@@ -14,6 +15,7 @@ This directory is organized by document purpose rather than release chronology.
 
 Long-lived system design and boundaries.
 
+- [Repository boundaries](architecture/repository-boundaries.md)
 - [Overview](architecture/overview.md)
 - [Layers](architecture/layers.md)
 - [Concurrency and ownership](architecture/concurrency-and-ownership.md)

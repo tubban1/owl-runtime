@@ -18,8 +18,8 @@ for (const dir of [parentWorkspace, repoA, repoB]) {
 }
 await fs.mkdir(repoTx, { recursive: true });
 
-process.env.AGENTOS_RUNTIME_MODE = "test";
-process.env.AGENTOS_STATE_ROOT = path.join(scratch, "state");
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.WORKSPACE_LEASE_DIR = path.join(
   scratch,
   "state",
@@ -391,7 +391,7 @@ try {
   assert.equal((await workspaceLeaseStatus(repoTx)).busy, false);
 
   // Production Runtime may not mutate its own active release.
-  process.env.AGENTOS_RUNTIME_MODE = "production";
+  process.env.OWL_RUNTIME_MODE = "production";
   await assert.rejects(
     () =>
       withExecutionContext(sessionB, async () =>
@@ -399,7 +399,7 @@ try {
       ),
     /RUNTIME_SELF_IMMUTABLE/,
   );
-  process.env.AGENTOS_RUNTIME_MODE = "test";
+  process.env.OWL_RUNTIME_MODE = "test";
 
   console.log(
     JSON.stringify(
@@ -426,7 +426,7 @@ try {
     ),
   );
 } finally {
-  process.env.AGENTOS_RUNTIME_MODE = "test";
+  process.env.OWL_RUNTIME_MODE = "test";
   if (processId) {
     runtimeSessionManager.disconnect(sessionA.sessionId);
     await withExecutionContext(sessionB, async () => {

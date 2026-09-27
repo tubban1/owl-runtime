@@ -1,6 +1,6 @@
-# AgentOS Runtime Architecture
+# OWL Runtime Architecture
 
-AgentOS Runtime is the post-v0.8 evolution of `computer-mcp`: a stable execution runtime beneath an external planner such as ChatGPT.
+OWL Runtime is the extracted post-v0.8 execution core of `computer-mcp`: a stable execution runtime beneath an external planner such as ChatGPT.
 
 The runtime does **not** embed a second general-purpose LLM planner. ChatGPT remains L3.
 
@@ -252,25 +252,11 @@ AgentOS Runtime should not be called 1.0 until these are stable:
 9. End-to-end conformance tests exist for each Primitive family.
 10. Security boundaries and side-effect verification are documented.
 
-## Naming
+## Naming and repository boundary
 
-Public product/runtime name:
+The open-source execution core is **OWL Runtime** in `tubban1/owl-runtime`. The `computer-mcp` repository remains a compatibility facade for MCP clients and must converge on consuming OWL Runtime rather than carrying a second Runtime implementation. `OWL_*` environment names are canonical; legacy `AGENTOS_*` names remain compatibility aliases during extraction.
 
-```text
-AgentOS Runtime
-```
-
-Compatibility identifiers remain unchanged for now:
-
-```text
-GitHub repository: tubban1/computer-mcp
-npm package:       computer-mcp
-MCP server name:   computer-mcp
-```
-
-This avoids breaking existing tunnels, plugin connections, scripts, documentation links, and local installations while the architecture stabilizes.
-
-A repository/package rename can be evaluated at the 1.0 boundary.
+See [Repository Boundaries](repository-boundaries.md).
 
 
 ### v0.9.8 — Semantic Promotion Pipeline

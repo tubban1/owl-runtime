@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 export type AgentOSRuntimeMode = "development" | "production" | "test";
 
 export function runtimeMode(): AgentOSRuntimeMode {
-  const raw = process.env.AGENTOS_RUNTIME_MODE?.trim().toLowerCase();
+  const raw = (process.env.OWL_RUNTIME_MODE ?? process.env.AGENTOS_RUNTIME_MODE)?.trim().toLowerCase();
   if (raw === "production" || raw === "test" || raw === "development") {
     return raw;
   }
@@ -13,22 +13,22 @@ export function runtimeMode(): AgentOSRuntimeMode {
 }
 
 export function runtimeCandidateMode(): boolean {
-  const raw = process.env.AGENTOS_CANDIDATE_MODE?.trim().toLowerCase();
+  const raw = (process.env.OWL_CANDIDATE_MODE ?? process.env.AGENTOS_CANDIDATE_MODE)?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 export function runtimeStateRoot(): string {
-  const configured = process.env.AGENTOS_STATE_ROOT?.trim();
+  const configured = (process.env.OWL_STATE_ROOT ?? process.env.AGENTOS_STATE_ROOT)?.trim();
   if (configured) return configured;
 
   const mode = runtimeMode();
   if (mode === "development") {
-    return path.join(os.homedir(), ".computer-mcp-dev");
+    return path.join(os.homedir(), ".owl-runtime-dev");
   }
   if (mode === "test") {
-    return path.join(os.homedir(), ".computer-mcp-test");
+    return path.join(os.homedir(), ".owl-runtime-test");
   }
-  return path.join(os.homedir(), ".computer-mcp");
+  return path.join(os.homedir(), ".owl-runtime");
 }
 
 export function runtimeStatePath(...segments: string[]): string {

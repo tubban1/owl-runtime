@@ -11,15 +11,16 @@ function unique(values: string[]): string[] {
 
 export function getRuntimeIdentity(): RuntimeIdentity {
   const productName =
-    process.env.AGENTOS_NAME?.trim() || "AgentOS Runtime";
+    process.env.OWL_NAME?.trim() || process.env.AGENTOS_NAME?.trim() || "OWL Runtime";
   const wakeName =
-    process.env.AGENTOS_WAKE_NAME?.trim() || "AgentOS";
+    process.env.OWL_WAKE_NAME?.trim() || process.env.AGENTOS_WAKE_NAME?.trim() || "OWL";
   const configuredAliases =
-    process.env.AGENTOS_ALIASES?.split(",").map((value) => value.trim()) ?? [];
+    (process.env.OWL_ALIASES ?? process.env.AGENTOS_ALIASES)?.split(",").map((value) => value.trim()) ?? [];
 
   const aliases = unique([
     wakeName,
     productName,
+    "OWL",
     "AgentOS",
     ...configuredAliases,
   ]);
@@ -29,7 +30,7 @@ export function getRuntimeIdentity(): RuntimeIdentity {
     wakeName,
     aliases,
     invocation:
-      `When computer-mcp is connected, addressing "${wakeName}" or another configured alias means the user is invoking ${productName} and wants the Runtime/tools used for the request when relevant.`,
+      `When an OWL Runtime adapter is connected, addressing "${wakeName}" or another configured alias means the user is invoking ${productName} and wants the Runtime/tools used for the request when relevant.`,
   };
 }
 

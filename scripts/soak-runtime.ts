@@ -156,8 +156,8 @@ for (const dir of repoDirs) {
 }
 await fs.mkdir(reportDir, { recursive: true });
 
-process.env.AGENTOS_RUNTIME_MODE = "test";
-process.env.AGENTOS_STATE_ROOT = state;
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = state;
 process.env.ALLOWED_DIRECTORIES = scratch;
 process.env.ALLOW_WRITE = "true";
 process.env.ALLOW_DELETE = "true";

@@ -11,8 +11,8 @@ const file = path.join(repo, "state.txt");
 await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(path.join(repo, ".git"), { recursive: true });
 
-process.env.AGENTOS_RUNTIME_MODE = "test";
-process.env.AGENTOS_STATE_ROOT = path.join(scratch, "state");
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.ALLOWED_DIRECTORIES = scratch;
 process.env.ALLOW_WRITE = "true";
 process.env.ALLOW_DELETE = "true";
