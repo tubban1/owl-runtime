@@ -163,7 +163,11 @@ export class HttpRuntimeClient implements RuntimeClient {
   }
 
   async info(): Promise<RuntimeClientInfo> {
-    return (await this.rpc("info")) as RuntimeClientInfo;
+    const info = (await this.rpc("info")) as RuntimeClientInfo;
+    return {
+      ...info,
+      transport: "http",
+    };
   }
 
   async getCapabilities(goal = ""): Promise<unknown> {

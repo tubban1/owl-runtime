@@ -53,6 +53,7 @@ let processId: string | undefined;
 try {
   const info = await client.info();
   assert.equal(info.apiVersion, "0.1");
+  assert.equal(info.transport, "http");
 
   const filePath = path.join(scratch, "transport.txt");
   const write = (await client.callPrimitive({
@@ -161,6 +162,7 @@ try {
   });
   const authenticatedInfo = await authenticatedProductionClient.info();
   assert.equal(authenticatedInfo.apiVersion, "0.1");
+  assert.equal(authenticatedInfo.transport, "http");
   process.env.OWL_RUNTIME_MODE = "test";
   delete process.env.OWL_RUNTIME_API_TOKEN;
 
