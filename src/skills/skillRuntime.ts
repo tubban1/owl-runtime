@@ -66,6 +66,14 @@ import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
 import { getObservationAbiManifest, type ObservationState } from "../observation/observationAbi.js";
 import { getVerifierAbiManifest } from "../verification/verifier.js";
+import {
+  approveApproval,
+  authorizeSkill,
+  denyApproval,
+  getApprovalPolicyStatus,
+  listApprovals,
+  readApproval,
+} from "../policy/approvalPolicy.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
   getStateMigrationRegistry,
@@ -273,6 +281,18 @@ const SKILL_RUNTIME_METADATA: Record<string, SkillRuntimeMetadata> = {
     },
   },
   "runtime.workspace": {
+    skillVersion: "0.1.0",
+    requiredPrimitiveAbi: 1,
+    requiredPrimitives: [],
+    executionMode: "inline",
+    memoryPolicy: {
+      working: "runtime",
+      staging: "available_when_durable",
+      episodic: "task_events_when_durable",
+      semanticPromotion: "manual",
+    },
+  },
+  "runtime.approval": {
     skillVersion: "0.1.0",
     requiredPrimitiveAbi: 1,
     requiredPrimitives: [],
@@ -509,7 +529,13 @@ function skillIsReadOnlyForLifecycle(
   }
   if (
     skillId === "runtime.process" &&
-    ["list", "status"].includes(operation || "list")
+    ["list", "status", "observe", "wait"].includes(operation || "list")
+  ) {
+    return true;
+  }
+  if (
+    skillId === "runtime.approval" &&
+    ["status", "list", "get"].includes(operation || "status")
   ) {
     return true;
   }
@@ -547,10 +573,11 @@ function skillAllowedDuringDrain(
   }
   if (
     skillId === "runtime.process" &&
-    ["list", "status", "claim"].includes(operation || "list")
+    ["list", "status", "observe", "wait", "claim"].includes(operation || "list")
   ) {
     return true;
   }
+  if (skillId === "runtime.approval") return true;
   return Boolean(currentExecutionContext().taskId);
 }
 
@@ -1017,6 +1044,15 @@ const PROCESS_CONTRACT: SkillContract = {
   riskLevel: "medium",
   idempotent: true,
   sideEffects: ["process_ownership_claim_when_requested"],
+  requiresVerification: true,
+  retryPolicy: "manual",
+  resources: [],
+};
+
+const APPROVAL_CONTRACT: SkillContract = {
+  riskLevel: "medium",
+  idempotent: false,
+  sideEffects: ["approval_state_mutation_when_requested"],
   requiresVerification: true,
   retryPolicy: "manual",
   resources: [],
@@ -2034,6 +2070,37 @@ const skills: SkillDefinition[] = [
       throw new Error(
         'runtime.workspace op must be "status", "list", "wait", "acquire", "renew", "release", "request_takeover", "handoff", "takeover", "list_handoffs", "handoff_status", or "cancel_takeover".',
       );
+    },
+  },
+  {
+    id: "runtime.approval",
+    domain: "runtime",
+    description:
+      "Inspect, approve, or deny one-time OWL Runtime approval requests bound to exact action/skill arguments.",
+    keywords: ["approval", "approve action", "human approval", "审批", "授权"],
+    contract: APPROVAL_CONTRACT,
+    inputs: {
+      op: "status | list | get | approve | deny. Default: status.",
+      approval_id: "Approval request id for get/approve/deny.",
+      state: "Optional list filter: pending | approved | consumed | denied | expired.",
+      confirm: "Must be true for approve/deny.",
+    },
+    dryRunPlan: (args) => ({ op: args.op ?? "status", approvalId: args.approval_id ?? null }),
+    run: async (args) => {
+      const operation = typeof args.op === "string" ? args.op.trim().toLowerCase() : "status";
+      if (operation === "status") return getApprovalPolicyStatus();
+      if (operation === "list") {
+        const state = typeof args.state === "string" &&
+          ["pending", "approved", "consumed", "denied", "expired"].includes(args.state)
+            ? args.state as "pending" | "approved" | "consumed" | "denied" | "expired"
+            : undefined;
+        return { approvals: await listApprovals({ state }) };
+      }
+      const approvalId = requiredText(args, "approval_id");
+      if (operation === "get") return await readApproval(approvalId);
+      if (operation === "approve") return await approveApproval(approvalId, optionalBoolean(args, "confirm", false));
+      if (operation === "deny") return await denyApproval(approvalId, optionalBoolean(args, "confirm", false));
+      throw new Error('runtime.approval op must be "status", "list", "get", "approve", or "deny".');
     },
   },
   {
@@ -3268,6 +3335,10 @@ export async function executeSkill(
   }
 
   const startedAt = Date.now();
+  const approval =
+    skill.id === "runtime.approval"
+      ? { required: false, mode: getApprovalPolicyStatus().mode, receipt: null }
+      : await authorizeSkill(skill.id, args, skill.contract);
   const lifecycleMutation =
     skill.contract.sideEffects.length > 0 &&
     !skillIsReadOnlyForLifecycle(skill.id, args) &&
@@ -3285,6 +3356,7 @@ export async function executeSkill(
       domain: skill.domain,
       runtime: runtimeMetadata,
       contract: skill.contract,
+      approval,
       durationMs: Date.now() - startedAt,
       result,
     };
@@ -3338,6 +3410,7 @@ export async function getCapabilityManifest(goal = "") {
       observationAbi: getObservationAbiManifest(),
       verifierAbi: getVerifierAbiManifest(),
       managedProcessStateMachine: "v1 candidate: observe/wait/interact with durable-record compatibility",
+      approvalPolicy: getApprovalPolicyStatus(),
       skillAbi: {
         runtimeMetadata: [
           "skillVersion",

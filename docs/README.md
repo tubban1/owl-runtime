@@ -63,6 +63,7 @@ Contracts intended to remain stable across implementations.
 ## Security
 
 - [Permissions](security/permissions.md)
+- [Approval policy and receipts](security/approval-policy.md)
 - [Audit](security/audit.md)
 - [Privacy and secrets](security/privacy-and-secrets.md)
 

@@ -40,7 +40,8 @@
     "uninstall:production": "bash scripts/uninstall-production-runtime.sh",
     "verify:observation-abi": "OWL_RUNTIME_MODE=test tsx scripts/verify-observation-abi.ts",
     "verify:verifier-abi": "OWL_RUNTIME_MODE=test tsx scripts/verify-verifier-abi.ts",
-    "verify:process-state": "OWL_RUNTIME_MODE=test tsx scripts/verify-process-state-machine.ts"
+    "verify:process-state": "OWL_RUNTIME_MODE=test tsx scripts/verify-process-state-machine.ts",
+    "verify:approval-policy": "OWL_RUNTIME_MODE=test tsx scripts/verify-approval-policy.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

@@ -55,6 +55,7 @@ import {
 } from "../runtime/workspaceLeaseManager.js";
 import { currentExecutionContext } from "../runtime/executionContext.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
+import { authorizeAction } from "../policy/approvalPolicy.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -778,6 +779,7 @@ export async function executeRoutedAction(
   const parsed = definition.schema.parse(args ?? {});
   const contract = getActionContract(action, parsed);
   const startedAt = Date.now();
+  const approval = await authorizeAction(action, parsed, contract);
   const executionContext = currentExecutionContext();
   const lifecycleMutation =
     contract.sideEffects.length > 0
@@ -859,6 +861,7 @@ export async function executeRoutedAction(
     resourceWaitMs: executed.lease.waitMs,
     contract: summarizeActionContract(contract),
     workspaceOwnership,
+    approval,
     result: executed.result,
   };
   } finally {
