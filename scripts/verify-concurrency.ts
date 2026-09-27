@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = path.join(root, ".tmp-verify-concurrency");
+const scratch = path.join(root, `.tmp-verify-concurrency-${process.pid}`);
 const parentWorkspace = path.join(scratch, "parent");
 const repoA = path.join(parentWorkspace, "repo-a");
 const repoB = path.join(parentWorkspace, "repo-b");

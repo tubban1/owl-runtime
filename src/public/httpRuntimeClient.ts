@@ -52,6 +52,11 @@ export type HttpRuntimeClientOptions = {
   userAgent?: string;
 };
 
+export type RuntimeInvokeOptions = {
+  requestId?: string;
+  signal?: AbortSignal;
+};
+
 export class HttpRuntimeClient implements RuntimeClient {
   private readonly baseUrl: string;
   private readonly sessionId: string;
@@ -69,8 +74,13 @@ export class HttpRuntimeClient implements RuntimeClient {
     this.userAgent = options.userAgent ?? "owl-runtime-client/0.1";
   }
 
-  private async rpc(method: RuntimeRpcMethod, params?: unknown): Promise<unknown> {
+  async invoke(
+    method: RuntimeRpcMethod,
+    params?: unknown,
+    options: RuntimeInvokeOptions = {},
+  ): Promise<unknown> {
     const requestId =
+      options.requestId ??
       `client:${Date.now().toString(36)}:${randomUUID()}`;
     const response = await fetch(`${this.baseUrl}/runtime/v0.1/rpc`, {
       method: "POST",
@@ -86,6 +96,7 @@ export class HttpRuntimeClient implements RuntimeClient {
         method,
         ...(params === undefined ? {} : { params }),
       }),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
 
     const payload = (await response.json()) as RpcSuccess | RpcFailure;
@@ -105,6 +116,50 @@ export class HttpRuntimeClient implements RuntimeClient {
       );
     }
     return payload.result;
+  }
+
+  async cancelRequest(requestId: string, reason?: string): Promise<unknown> {
+    const apiRequestId =
+      `cancel:${Date.now().toString(36)}:${randomUUID()}`;
+    const response = await fetch(`${this.baseUrl}/runtime/v0.1/cancel`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": this.userAgent,
+        "x-owl-session-id": this.sessionId,
+        "x-owl-request-id": apiRequestId,
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: JSON.stringify({
+        requestId,
+        ...(reason ? { reason } : {}),
+      }),
+    });
+
+    const payload = (await response.json()) as RpcSuccess | RpcFailure;
+    if (!response.ok || payload.ok !== true) {
+      throw new RuntimeRpcError(
+        payload.ok === false
+          ? payload
+          : {
+              ok: false,
+              apiVersion: RUNTIME_PUBLIC_API_VERSION,
+              requestId: apiRequestId,
+              error: {
+                code: `HTTP_${response.status}`,
+                message: `OWL Runtime HTTP ${response.status}`,
+              },
+            },
+      );
+    }
+    return payload.result;
+  }
+
+  private async rpc(
+    method: RuntimeRpcMethod,
+    params?: unknown,
+  ): Promise<unknown> {
+    return await this.invoke(method, params);
   }
 
   async info(): Promise<RuntimeClientInfo> {

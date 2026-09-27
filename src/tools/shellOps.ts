@@ -28,6 +28,12 @@ import {
 import { runtimeSessionManager } from "../runtime/runtimeSessionManager.js";
 import { createObservation, type ObservationState } from "../observation/observationAbi.js";
 import { assessManagedProcessState } from "../runtime/processState.js";
+import {
+  cancellableSleep,
+  currentCancellationSignal,
+  OperationCancelledError,
+  throwIfCancelled,
+} from "../runtime/cancellation.js";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const runtimeInstanceId =
@@ -47,6 +53,29 @@ function appendCapped(current: string, next: Buffer | string): string {
 
 function shellBinary(): string {
   return process.env.SHELL || "/bin/zsh";
+}
+
+function signalProcessGroup(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+): boolean {
+  if (!child.pid) return false;
+
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+
+  try {
+    return child.kill(signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 function pidAlive(pid: number): boolean {
@@ -178,6 +207,8 @@ export async function executeCommand(
 ) {
   requireCapability("ALLOW_SHELL", false);
   const safeCwd = await assertAllowedExistingPath(cwd);
+  const cancellationSignal = currentCancellationSignal();
+  throwIfCancelled(cancellationSignal);
 
   return await new Promise<{
     command: string;
@@ -191,12 +222,38 @@ export async function executeCommand(
     const child = spawn(shellBinary(), ["-lc", command], {
       cwd: safeCwd,
       env: process.env,
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
 
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
+    let cancellationReason: unknown;
+    let settled = false;
+
+    const cleanup = () => {
+      cancellationSignal?.removeEventListener("abort", onAbort);
+    };
+
+    const terminate = () => {
+      signalProcessGroup(child, "SIGTERM");
+      setTimeout(() => {
+        try {
+          signalProcessGroup(child, "SIGKILL");
+        } catch {
+          // Process already exited.
+        }
+      }, 2_000).unref();
+    };
+
+    const onAbort = () => {
+      if (settled || cancelled) return;
+      cancelled = true;
+      cancellationReason = cancellationSignal?.reason;
+      terminate();
+    };
 
     child.stdout?.on("data", (chunk) => {
       stdout = appendCapped(stdout, chunk);
@@ -204,16 +261,31 @@ export async function executeCommand(
     child.stderr?.on("data", (chunk) => {
       stderr = appendCapped(stderr, chunk);
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    });
+
+    cancellationSignal?.addEventListener("abort", onAbort, { once: true });
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+      terminate();
     }, Math.min(Math.max(timeoutMs, 1_000), 10 * 60_000));
 
     child.on("close", (exitCode, signal) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      cleanup();
+
+      if (cancelled) {
+        reject(new OperationCancelledError(cancellationReason));
+        return;
+      }
+
       resolve({
         command,
         cwd: safeCwd,
@@ -535,7 +607,7 @@ export async function waitForProcessState(
     !["finished", "failed", "lost"].includes(observation.state) &&
     Date.now() < deadline
   ) {
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    await cancellableSleep(pollMs);
     observation = await observeProcess(processId, options.tailChars ?? 20_000);
   }
 
@@ -612,10 +684,14 @@ export async function killProcess(
   let sent = false;
   const live = liveChildren.get(processId);
   if (live) {
-    sent = live.child.kill(signal);
+    sent = signalProcessGroup(live.child, signal);
   } else {
     try {
-      process.kill(record.pid, signal);
+      if (process.platform !== "win32") {
+        process.kill(-record.pid, signal);
+      } else {
+        process.kill(record.pid, signal);
+      }
       sent = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;

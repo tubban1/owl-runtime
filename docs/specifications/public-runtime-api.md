@@ -130,7 +130,9 @@ The HTTP conformance test proves:
 - File Observation + Verification receipts survive the transport boundary;
 - missing logical session identity is rejected.
 
-**Cancellation is not declared ready yet.** A client-side/transport timeout must not be interpreted as proof that Runtime execution was cancelled. Cancellation propagation and orphan cleanup remain P0 before heavy multi-session migration.
+Cancellation is now available for the local HTTP transport through request-scoped AbortSignal propagation and `POST /runtime/v0.1/cancel`. The caller session may cancel only its own active request; cross-session cancellation is rejected with `REQUEST_OWNED`. Synchronous shell execution terminates the whole POSIX process group, so nested `npm -> tsc` style children do not survive cancellation.
+
+This is a **P0 foundation, not blanket cancellation readiness for every provider**. Consumers may rely on it for cancellation-aware shell execution and bounded Runtime waits that use the cancellation context. Browser/Desktop/provider-specific cancellation still needs capability-level conformance before migration.
 
 MCP remains a consumer/adapter concern.
 

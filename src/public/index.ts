@@ -26,6 +26,7 @@ export {
   HttpRuntimeClient,
   RuntimeRpcError,
   type HttpRuntimeClientOptions,
+  type RuntimeInvokeOptions,
 } from "./httpRuntimeClient.js";
 
 export {
