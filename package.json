@@ -37,7 +37,8 @@
     "install:production": "bash scripts/install-production-runtime.sh",
     "upgrade:production": "bash scripts/upgrade-production-runtime.sh",
     "status:production": "bash scripts/status-production-runtime.sh",
-    "uninstall:production": "bash scripts/uninstall-production-runtime.sh"
+    "uninstall:production": "bash scripts/uninstall-production-runtime.sh",
+    "verify:observation-abi": "OWL_RUNTIME_MODE=test tsx scripts/verify-observation-abi.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

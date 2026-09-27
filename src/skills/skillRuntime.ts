@@ -64,6 +64,7 @@ import {
 } from "../runtime/sessionAdapters.js";
 import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
+import { getObservationAbiManifest } from "../observation/observationAbi.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
   getStateMigrationRegistry,
@@ -3293,6 +3294,7 @@ export async function getCapabilityManifest(goal = "") {
         version: 1,
         stability: "candidate",
       },
+      observationAbi: getObservationAbiManifest(),
       skillAbi: {
         runtimeMetadata: [
           "skillVersion",
