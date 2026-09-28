@@ -70,6 +70,7 @@ Contracts intended to remain stable across implementations.
 
 ## Security
 
+- [Cloud authorization boundary](security/cloud-authorization-boundary.md)
 - [Permissions](security/permissions.md)
 - [Approval policy and receipts](security/approval-policy.md)
 - [Audit](security/audit.md)
