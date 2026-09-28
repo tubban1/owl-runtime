@@ -1,5 +1,7 @@
 # Post-1.0 Directions
 
+Canonical minor-version plan: [OWL Runtime 1.x Evolution Plan](1.x-evolution.md).
+
 These are intentionally not release blockers for AgentOS Runtime 1.0.
 
 - event-driven adapters beyond polling

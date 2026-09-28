@@ -10,6 +10,8 @@ This directory is organized by document purpose rather than release chronology.
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
 - [v1.0 scope lock](roadmap/1.0-scope-lock.md)
+- [v1.0 frozen baseline](roadmap/1.0-frozen-baseline.md)
+- [v1.x evolution](roadmap/1.x-evolution.md)
 - [Production Runtime](operations/production-runtime.md)
 - [Concurrency and ownership](architecture/concurrency-and-ownership.md)
 
@@ -77,6 +79,7 @@ Contracts intended to remain stable across implementations.
 
 - [v1.0](roadmap/v1.0.md)
 - [Post-1.0](roadmap/post-1.0.md)
+- [v1.x evolution](roadmap/1.x-evolution.md)
 - [Release checklist](roadmap/release-checklist.md)
 
 ## Architecture Decision Records

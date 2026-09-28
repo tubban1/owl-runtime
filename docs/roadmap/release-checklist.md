@@ -69,7 +69,7 @@ The evidence records Git SHA, branch, platform, Node version, each check's exit 
 - [ ] final reports show no leaked Tasks/processes/leases
 - [ ] final reports show no duplicate Scheduler/Loop side effects
 
-Smoke is required for `1.0.0-rc.1`. The real 2h/6h/24h sequence is required before final `1.0.0`.
+Smoke is required for the current `1.0.0-rc.2` candidate. The real 2h/6h/24h sequence is required before final `1.0.0`.
 
 ## Production
 
@@ -102,6 +102,10 @@ Smoke is required for `1.0.0-rc.1`. The real 2h/6h/24h sequence is required befo
 
 Requires all 1.0 code work packages DONE + `npm run verify:rc` green.
 
-### `1.0.0-rc.1` → `1.0.0`
+### `1.0.0-rc.1` → `1.0.0-rc.2`
+
+`rc.2` is a stabilization-only candidate. It adds no new product surface. It closes the Resource Arbiter cancellation gap found during the real-world `.agentOS` / `.computer-mcp` audit: a cancelled request waiting on a conflicting resource must be removed from the pending queue and must never execute later.
+
+### `1.0.0-rc.2` → `1.0.0`
 
 Requires RC dogfood + real 2h/6h/24h soak evidence + fresh-machine setup verification. No new feature work is permitted during this phase unless it fixes a release-blocking correctness/security/recovery defect.

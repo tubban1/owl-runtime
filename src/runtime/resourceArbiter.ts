@@ -1,6 +1,11 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ResourceRequirement } from "./actionContracts.js";
+import {
+  currentCancellationSignal,
+  OperationCancelledError,
+  throwIfCancelled,
+} from "./cancellation.js";
 
 type ActiveResource = {
   readers: Set<string>;
@@ -13,6 +18,9 @@ type PendingRequest = {
   resources: ResourceRequirement[];
   enqueuedAt: number;
   resolve: (lease: ResourceLease) => void;
+  reject: (error: unknown) => void;
+  signal?: AbortSignal;
+  abortListener?: () => void;
 };
 
 export type ResourceLease = {
@@ -121,6 +129,14 @@ class ResourceArbiter {
       }
 
       this.pending.splice(index, 1);
+      if (request.abortListener) {
+        request.signal?.removeEventListener("abort", request.abortListener);
+      }
+      if (request.signal?.aborted) {
+        request.reject(new OperationCancelledError(request.signal.reason));
+        continue;
+      }
+
       this.markGranted(request.ticket, request.resources);
       let released = false;
       request.resolve({
@@ -140,6 +156,8 @@ class ResourceArbiter {
   async acquire(action: string, resources: ResourceRequirement[]): Promise<ResourceLease> {
     const normalized = normalizeResources(resources);
     const ticket = randomUUID();
+    const signal = currentCancellationSignal();
+    throwIfCancelled(signal);
 
     if (normalized.length === 0) {
       return {
@@ -151,14 +169,33 @@ class ResourceArbiter {
       };
     }
 
-    return await new Promise<ResourceLease>((resolve) => {
-      this.pending.push({
+    return await new Promise<ResourceLease>((resolve, reject) => {
+      const request: PendingRequest = {
         ticket,
         action,
         resources: normalized,
         enqueuedAt: Date.now(),
         resolve,
-      });
+        reject,
+        signal,
+      };
+
+      if (signal) {
+        request.abortListener = () => {
+          const index = this.pending.findIndex(
+            (candidate) => candidate.ticket === ticket,
+          );
+          if (index < 0) return;
+
+          this.pending.splice(index, 1);
+          signal.removeEventListener("abort", request.abortListener!);
+          reject(new OperationCancelledError(signal.reason));
+          this.drain();
+        };
+        signal.addEventListener("abort", request.abortListener, { once: true });
+      }
+
+      this.pending.push(request);
       this.drain();
     });
   }

@@ -19,6 +19,10 @@ process.env.OWL_APPROVAL_MODE = "compat";
 const parentPath = path.join(scratch, "parent.cjs");
 const childPath = path.join(scratch, "child.cjs");
 const markerPath = path.join(scratch, "should-not-exist.txt");
+const queuedHttpMarkerPath = path.join(
+  scratch,
+  "queued-http-should-not-exist.txt",
+);
 
 await fs.writeFile(
   childPath,
@@ -47,6 +51,13 @@ const {
 const { runtimeRequestCancellationRegistry } = await import(
   "../src/runtime/requestCancellationRegistry.js"
 );
+const { resourceArbiter } = await import(
+  "../src/runtime/resourceArbiter.js"
+);
+const {
+  OperationCancelledError,
+  withCancellationSignal,
+} = await import("../src/runtime/cancellation.js");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -134,6 +145,118 @@ try {
     false,
   );
 
+  // A real HTTP disconnect while a write is waiting behind a conflicting
+  // resource must cancel the queued Runtime work. Releasing the holder later
+  // must not produce a delayed filesystem side effect.
+  const httpHolder = await resourceArbiter.acquire("http-disconnect-holder", [
+    { key: `fs:${queuedHttpMarkerPath}`, mode: "exclusive" },
+  ]);
+  const disconnectRequestId = "dogfood:cancellation:http-disconnect";
+  const disconnectBody = JSON.stringify({
+    method: "primitive.call",
+    params: {
+      primitive: "fs.write",
+      op: "write",
+      args: {
+        path: queuedHttpMarkerPath,
+        content: "late side effect",
+        overwrite: true,
+        create_parents: true,
+      },
+    },
+  });
+  const disconnectUrl = new URL("/runtime/v0.1/rpc", baseUrl);
+  const disconnectRequest = http.request(
+    {
+      hostname: disconnectUrl.hostname,
+      port: disconnectUrl.port,
+      path: disconnectUrl.pathname,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(disconnectBody),
+        "x-owl-session-id": sessionId,
+        "x-owl-request-id": disconnectRequestId,
+      },
+    },
+  );
+  disconnectRequest.on("error", () => undefined);
+  disconnectRequest.write(disconnectBody);
+  disconnectRequest.end();
+
+  const pendingDeadline = Date.now() + 3_000;
+  while (
+    !resourceArbiter.status().pending.some(
+      (item) => item.action === "fs.write",
+    )
+  ) {
+    if (Date.now() >= pendingDeadline) {
+      throw new Error("HTTP disconnect verifier never entered resource wait.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  disconnectRequest.destroy();
+
+  const cancelledDeadline = Date.now() + 3_000;
+  while (
+    resourceArbiter.status().pending.some(
+      (item) => item.action === "fs.write",
+    )
+  ) {
+    if (Date.now() >= cancelledDeadline) {
+      throw new Error(
+        "HTTP-disconnected request remained in the resource queue.",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  httpHolder.release();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await assert.rejects(() => fs.access(queuedHttpMarkerPath));
+
+  // A cancelled request waiting behind a conflicting resource must be removed
+  // from the Arbiter queue. It must never execute later after the holder
+  // releases the resource.
+  const holder = await resourceArbiter.acquire("holder", [
+    { key: "verify:cancellation-resource", mode: "exclusive" },
+  ]);
+  const queuedController = new AbortController();
+  const queued = withCancellationSignal(
+    queuedController.signal,
+    async () =>
+      await resourceArbiter.acquire("cancelled-waiter", [
+        { key: "verify:cancellation-resource", mode: "exclusive" },
+      ]),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(
+    resourceArbiter.status().pending.some(
+      (item) => item.action === "cancelled-waiter",
+    ),
+    true,
+  );
+  queuedController.abort("queued request disconnected");
+  await assert.rejects(
+    () => queued,
+    (error: unknown) => error instanceof OperationCancelledError,
+  );
+  assert.equal(
+    resourceArbiter.status().pending.some(
+      (item) => item.action === "cancelled-waiter",
+    ),
+    false,
+  );
+  holder.release();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(resourceArbiter.status().heldTickets, 0);
+
+  const fresh = await resourceArbiter.acquire("fresh-waiter", [
+    { key: "verify:cancellation-resource", mode: "exclusive" },
+  ]);
+  assert.ok(fresh.waitMs < 100);
+  fresh.release();
+
   console.log(JSON.stringify({
     ok: true,
     explicitRequestCancellation: true,
@@ -142,6 +265,10 @@ try {
     processGroupTerminated: true,
     noGrandchildOrphanMarker: true,
     activeRequestRegistryCleaned: true,
+    httpDisconnectCancelsQueuedWork: true,
+    noLateSideEffectAfterHttpDisconnect: true,
+    cancelledResourceWaitRemoved: true,
+    cancelledResourceWaitNeverGrantedLater: true,
   }, null, 2));
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
