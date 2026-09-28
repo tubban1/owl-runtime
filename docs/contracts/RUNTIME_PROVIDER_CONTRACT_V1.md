@@ -70,3 +70,7 @@ Within Runtime API v1:
 - additive fields/operations may be added in compatible minor releases
 - existing semantics cannot silently change
 - breaking public contract requires a new major contract version
+
+## Shared development protocol
+
+All cross-repo implementation follows [OWL Cross-Repo Development Protocol v1](https://github.com/tubban1/owl-desktop/blob/main/docs/architecture/CROSS_REPO_DEVELOPMENT_PROTOCOL_V1.md).
