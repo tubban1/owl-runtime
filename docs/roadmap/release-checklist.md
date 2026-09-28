@@ -69,7 +69,7 @@ The evidence records Git SHA, branch, platform, Node version, each check's exit 
 - [ ] final reports show no leaked Tasks/processes/leases
 - [ ] final reports show no duplicate Scheduler/Loop side effects
 
-Smoke is required for the current `1.0.0-rc.3` candidate. The real 2h/6h/24h sequence is required before final `1.0.0`.
+Smoke is required for the current `1.0.0-rc.4` candidate. The real 2h/6h/24h sequence is required before final `1.0.0`.
 
 ## Production
 
@@ -112,6 +112,10 @@ Requires all 1.0 code work packages DONE + `npm run verify:rc` green.
 
 The Runtime Host has an independent lifecycle and fingerprint. Ordinary 1.x Runtime promotions must preserve the installed host binary unless an explicit native-host upgrade is approved.
 
-### `1.0.0-rc.3` → `1.0.0`
+### `1.0.0-rc.3` → `1.0.0-rc.4`
+
+`rc.4` is a concurrency-correctness candidate. Long-soak testing exposed that the active-idle session recovery heuristic could reclaim a still-connected session-only workspace lease and admit a competing writer. `rc.4` removes connected-session idle reclamation: ownership is reclaimed only after known disconnect, Runtime-instance replacement, explicit release/handoff, or lease TTL.
+
+### `1.0.0-rc.4` → `1.0.0`
 
 Requires RC dogfood + real 2h/6h/24h soak evidence + fresh-machine setup verification. No new feature work is permitted during this phase unless it fixes a release-blocking correctness/security/recovery defect.

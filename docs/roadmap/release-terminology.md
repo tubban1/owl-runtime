@@ -42,7 +42,8 @@ For OWL Runtime 1.0:
 
 - `rc.1` — first frozen 1.0 candidate line;
 - `rc.2` — cancellation correctness stabilization;
-- `rc.3` — stable macOS Runtime Host / Full Disk Access identity stabilization.
+- `rc.3` — stable macOS Runtime Host / Full Disk Access identity stabilization;
+- `rc.4` — long-soak workspace lease concurrency correctness stabilization.
 
 RC numbers are **not** stable patch releases. After stable `1.0.0`, maintenance releases are `1.0.1`, `1.0.2`, and so on.
 

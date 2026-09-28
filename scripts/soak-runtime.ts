@@ -182,7 +182,6 @@ process.env.PROCESS_MONITOR_POLL_MS = String(
 process.env.WORKSPACE_LEASE_DIR = path.join(state, "workspace-leases");
 process.env.WORKSPACE_HANDOFF_DIR = path.join(state, "workspace-handoffs");
 process.env.WORKSPACE_SESSION_RECLAIM_GRACE_MS = "250";
-process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS = "60000";
 process.env.SEMANTIC_MEMORY_DIR = path.join(state, "semantic");
 process.env.SEMANTIC_MEMORY_KEY_PATH = path.join(state, "semantic.key");
 process.env.SESSION_ADAPTER_DIR = path.join(state, "sessions");

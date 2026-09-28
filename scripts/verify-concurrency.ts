@@ -331,24 +331,34 @@ try {
     await releaseWorkspaceLease(repoB),
   );
 
-  // Chat stream recovery can leave a transport session looking active even
-  // though it never makes another call. Session-only leases are reclaimable
-  // after a conservative idle timeout. The verifier sets that timeout to zero
-  // only for this isolated test.
+  // A connected session's explicit lease must never be stolen solely because
+  // the session has been idle. Idle time is not proof that write ownership
+  // ended. This is intentionally fail-safe: disconnected/previous-runtime
+  // leases can be reclaimed, but connected ownership requires TTL, release,
+  // or an explicit handoff. The legacy idle-reclaim env no longer weakens
+  // this guarantee.
   process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS = "0";
-  const idleLease = await withExecutionContext(sessionD, async () =>
+  const connectedLease = await withExecutionContext(sessionD, async () =>
     await ensureWorkspaceWriteLease(repoB, {
-      purpose: "same-runtime stale active session lease",
+      purpose: "connected session lease must not be stolen",
+      ttlMs: 10_000,
     }),
   );
-  assert.equal(idleLease.ownerSessionId, sessionD.sessionId);
-  const idleReclaimed = await withExecutionContext(sessionB, async () =>
-    await ensureWorkspaceWriteLease(repoB, {
-      purpose: "reclaimed after stale active transport",
-    }),
+  assert.equal(connectedLease.ownerSessionId, sessionD.sessionId);
+  await assert.rejects(
+    () =>
+      withExecutionContext(sessionB, async () =>
+        await ensureWorkspaceWriteLease(repoB, {
+          purpose: "must remain blocked by connected owner",
+        }),
+      ),
+    /WORKSPACE_BUSY/,
   );
-  assert.equal(idleReclaimed.ownerSessionId, sessionB.sessionId);
-  await withExecutionContext(sessionB, async () =>
+  assert.equal(
+    (await workspaceLeaseStatus(repoB)).lease?.ownerSessionId,
+    sessionD.sessionId,
+  );
+  await withExecutionContext(sessionD, async () =>
     await releaseWorkspaceLease(repoB),
   );
   delete process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS;
@@ -416,7 +426,7 @@ try {
         processExitReleasesLease: true,
         orphanSessionLeaseReclamation: true,
         sameRuntimeDisconnectedSessionReclamation: true,
-        staleActiveSessionReclamation: true,
+        connectedSessionLeaseNotStolenWhenIdle: true,
         transactionOwnershipTransportIndependent: true,
         sameFileBatchEditsCompose: true,
         runtimeSelfProductionGuard: true,

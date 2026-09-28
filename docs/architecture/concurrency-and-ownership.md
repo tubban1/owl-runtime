@@ -163,17 +163,12 @@ That has an important consequence:
 
 For this reason, AgentOS prefers Task-, Process-, and Transaction-scoped ownership for work that spans multiple tool calls.
 
-Session-only leases support two recovery paths when they have no Task owner and no pinned process:
+Session-only leases support safe recovery when they have no Task owner and no pinned process:
 
-1. reclaim after the Runtime knows the owning MCP session disconnected
-2. conservative reclaim after the owning session remains active-but-idle beyond the configured timeout
+1. reclaim after the Runtime knows the owning transport disconnected;
+2. reclaim after a Runtime-instance replacement makes an unpinned session lease definitively stale;
+3. otherwise respect explicit release/handoff and the lease's own TTL.
 
-The same-Runtime idle timeout defaults to 15 minutes and can be configured with:
+A still-connected session is **not** considered abandoned merely because it has been idle. Long-soak testing showed that an idle-time heuristic can steal a legitimate write lease and admit a second writer. OWL Runtime therefore fails safe: uncertain ownership remains owned.
 
-```text
-WORKSPACE_SESSION_IDLE_RECLAIM_MS
-```
-
-This timeout is intentionally conservative. It is a safety valve for stale transport state, not a substitute for durable Task ownership.
-
-A stream-recovery incident should therefore not be solved by silently stealing a Task/Process/Transaction lease. Only disposable session-only ownership is eligible for idle reclamation.
+A stream-recovery incident should be solved through real disconnect detection or durable Task/Process/Transaction ownership, not by guessing that a connected owner disappeared.
