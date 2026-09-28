@@ -18,6 +18,7 @@ LOG_DIR="$OWL_HOME/logs"
 LABEL="com.owl.runtime"
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
+RUNTIME_HOST_BIN="$HOME/Applications/OWL Runtime.app/Contents/MacOS/OwlRuntimeHost"
 CONTROL_CLIENT="$REPO_ROOT/scripts/runtime-control-client.mjs"
 STATE_CLIENT="$REPO_ROOT/scripts/runtime-state-client.mjs"
 PREVIOUS_RELEASE="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
@@ -36,6 +37,13 @@ fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Production environment does not exist: $ENV_FILE"
+  exit 2
+fi
+
+if [[ ! -x "$RUNTIME_HOST_BIN" ]]; then
+  echo "Stable OWL Runtime Host is not installed: $RUNTIME_HOST_BIN"
+  echo "Install it once with: npm run install:runtime-host"
+  echo "Then grant Full Disk Access to OWL Runtime before production use."
   exit 2
 fi
 
@@ -126,7 +134,7 @@ fi
 export OWL_RUNTIME_MODE=production
 export OWL_STATE_ROOT="${OWL_PRODUCTION_STATE_ROOT:-${AGENTOS_PRODUCTION_STATE_ROOT:-$STATE_ROOT}}"
 RELEASE_ROOT="\$(cd "\$(dirname "\$0")" && pwd)"
-exec "$NODE_BIN" "\$RELEASE_ROOT/dist/server.js"
+exec "$RUNTIME_HOST_BIN" --env-file "$ENV_FILE" "$NODE_BIN" "\$RELEASE_ROOT/dist/server.js"
 EOF
 chmod 700 "$TMP_RELEASE/run.sh"
 

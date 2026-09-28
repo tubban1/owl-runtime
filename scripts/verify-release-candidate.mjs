@@ -47,6 +47,7 @@ const checks = [
   ["git-diff-check", "git", ["diff", "--check"]],
   ["shell-syntax", "/bin/zsh", ["-n",
     "scripts/install-production-runtime.sh",
+    "scripts/install-macos-runtime-host.sh",
     "scripts/upgrade-production-runtime.sh",
     "scripts/status-production-runtime.sh",
     "scripts/uninstall-production-runtime.sh",
@@ -80,6 +81,7 @@ const checks = [
   ["production-runtime", "npm", ["run", "verify:production-runtime"]],
   ["upgrade-runtime", "npm", ["run", "verify:upgrade-runtime"]],
   ["macos-helper", "npm", ["run", "verify:macos-helper"]],
+  ["runtime-host", "npm", ["run", "verify:runtime-host"]],
 ];
 
 const branch = gitText("branch", "--show-current");

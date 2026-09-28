@@ -69,7 +69,7 @@ The evidence records Git SHA, branch, platform, Node version, each check's exit 
 - [ ] final reports show no leaked Tasks/processes/leases
 - [ ] final reports show no duplicate Scheduler/Loop side effects
 
-Smoke is required for the current `1.0.0-rc.2` candidate. The real 2h/6h/24h sequence is required before final `1.0.0`.
+Smoke is required for the current `1.0.0-rc.3` candidate. The real 2h/6h/24h sequence is required before final `1.0.0`.
 
 ## Production
 
@@ -106,6 +106,12 @@ Requires all 1.0 code work packages DONE + `npm run verify:rc` green.
 
 `rc.2` is a stabilization-only candidate. It adds no new product surface. It closes the Resource Arbiter cancellation gap found during the real-world `.agentOS` / `.computer-mcp` audit: a cancelled request waiting on a conflicting resource must be removed from the pending queue and must never execute later.
 
-### `1.0.0-rc.2` → `1.0.0`
+### `1.0.0-rc.2` → `1.0.0-rc.3`
+
+`rc.3` is a production-packaging stabilization candidate. It adds a stable permission-bearing macOS Runtime Host at `~/Applications/OWL Runtime.app` (`fan.fde.owl.runtime`) so ordinary Runtime code releases do not change the Full Disk Access identity.
+
+The Runtime Host has an independent lifecycle and fingerprint. Ordinary 1.x Runtime promotions must preserve the installed host binary unless an explicit native-host upgrade is approved.
+
+### `1.0.0-rc.3` → `1.0.0`
 
 Requires RC dogfood + real 2h/6h/24h soak evidence + fresh-machine setup verification. No new feature work is permitted during this phase unless it fixes a release-blocking correctness/security/recovery defect.

@@ -314,7 +314,7 @@ try {
     );
     assert.match(
       source,
-      /exec "\$NODE_BIN" "\\\$RELEASE_ROOT\/dist\/server\.js"/,
+      /exec "\$RUNTIME_HOST_BIN" --env-file "\$ENV_FILE" "\$NODE_BIN" "\\\$RELEASE_ROOT\/dist\/server\.js"/,
     );
   }
 
@@ -343,6 +343,7 @@ try {
         upgradeScriptSyntax: true,
         drainTimeoutValidation: true,
         releaseRunTemplateEscaped: true,
+        stableRuntimeHostInReleaseTemplate: true,
         installScriptSyntax: true,
       },
       null,

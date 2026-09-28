@@ -81,6 +81,7 @@ Contracts intended to remain stable across implementations.
 - [Post-1.0](roadmap/post-1.0.md)
 - [v1.x evolution](roadmap/1.x-evolution.md)
 - [Release checklist](roadmap/release-checklist.md)
+- [Release terminology](roadmap/release-terminology.md)
 
 ## Architecture Decision Records
 

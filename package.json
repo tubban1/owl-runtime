@@ -1,6 +1,6 @@
 {
   "name": "owl-runtime",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "private": false,
   "type": "module",
   "scripts": {
@@ -37,6 +37,8 @@
     "soak:status": "node scripts/soak-status.mjs",
     "verify:state-schema": "OWL_RUNTIME_MODE=test tsx scripts/verify-state-schema.ts",
     "verify:upgrade-runtime": "npm run build && OWL_RUNTIME_MODE=test tsx scripts/verify-upgrade-runtime.ts",
+    "install:runtime-host": "zsh scripts/install-macos-runtime-host.sh",
+    "verify:runtime-host": "xcrun swiftc -frontend -parse macos-runtime-host/OwlRuntimeHost.swift && OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-host.ts",
     "install:production": "bash scripts/install-production-runtime.sh",
     "upgrade:production": "bash scripts/upgrade-production-runtime.sh",
     "status:production": "bash scripts/status-production-runtime.sh",
