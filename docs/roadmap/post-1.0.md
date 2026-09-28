@@ -2,7 +2,7 @@
 
 These are intentionally not release blockers for OWL Runtime 1.0.
 
-Post-1.0 work is governed by the [Architecture Constitution](../architecture/constitution.md), [Owl Lab philosophy alignment audit](../architecture/owl-lab-philosophy-alignment.md), and [Evolution Discipline](evolution-discipline.md). Owl Lab is an architecture research source, not a feature checklist. Ideas enter Runtime only when they become generic execution invariants backed by consumer evidence.
+Post-1.0 work is governed by the [Architecture Constitution](../architecture/constitution.md), [Owl Lab philosophy alignment audit](../architecture/owl-lab-philosophy-alignment.md), [Owl Lab code audit](../architecture/owl-lab-code-audit.md), and [Evolution Discipline](evolution-discipline.md). Owl Lab is an architecture research source, not a feature checklist. Ideas enter Runtime only when they become generic execution invariants backed by consumer evidence.
 
 Priority research candidates for 1.1 are intentionally capped at three protocol surfaces: GroundedState v1, RemediationReceipt v1, and a Governed Capability Manifest v1. They remain proposals until Computer MCP or OWL Worker provides concrete evidence.
 

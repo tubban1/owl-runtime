@@ -9,6 +9,7 @@ This directory is organized by document purpose rather than release chronology.
 - [Architecture overview](architecture/overview.md)
 - [Architecture constitution](architecture/constitution.md)
 - [Owl Lab philosophy alignment](architecture/owl-lab-philosophy-alignment.md)
+- [Owl Lab code audit](architecture/owl-lab-code-audit.md)
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
 - [v1.0 scope lock](roadmap/1.0-scope-lock.md)
@@ -26,6 +27,7 @@ Long-lived system design and boundaries.
 - [Runtime identity](architecture/runtime-identity.md)
 - [Architecture constitution](architecture/constitution.md)
 - [Owl Lab philosophy alignment](architecture/owl-lab-philosophy-alignment.md)
+- [Owl Lab code audit](architecture/owl-lab-code-audit.md)
 
 ## Specifications
 

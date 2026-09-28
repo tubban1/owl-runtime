@@ -155,3 +155,10 @@ Owl Lab should remain the architecture laboratory. OWL Runtime should absorb onl
 The audit was distilled from Owl Lab's OS Constitution/Whitepaper, L0/L0.5/L1/L2/L2.5/L3 layer specifications, Runtime Resource Arbiter/Policy/Primitive Executor/State/Memory specifications, and Evolution protocols covering Runtime Grounding, Task Stage, Handoff, Remediation, Skill I/O, HITL, Action normalization, Kernel refactoring, Skill self-repair, orchestration state machines, sandbox direction and Task/Stage management.
 
 Historical or pending Owl Lab documents are treated as research evidence, not automatically normative for OWL Runtime.
+
+
+## Code-level follow-up
+
+A second-pass implementation audit found additional reusable patterns around contract-driven audit plans, zero-trust payload/control envelopes, type-preserving runtime references, capability integrity in discovery, failure-threshold escalation, adapter role decomposition, coordinate-frame grounding, cooperative preemption, attachment-to-Stage normalization, and persisted evaluation evidence.
+
+See [Owl Lab Code Audit](owl-lab-code-audit.md). The audit also records explicit anti-patterns that OWL Runtime must not inherit, including trust-on-sensor-failure, autonomous pixel-force recovery, kernel self-modification, aggressive planner-output salvage, provider-owned infinite loops, and automatic memory promotion from one success.

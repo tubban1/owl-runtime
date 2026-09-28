@@ -73,7 +73,9 @@ These are proposals, not commitments. Each still requires consumer evidence.
 
 ### Later 1.x
 
-Candidates only after evidence: Run/Handoff Receipt, stronger Stage/ArtifactRef flow, event-driven wake signals, provider fallback policy, staging retention/compaction, richer memory conflict/consolidation.### 2.0+
+Candidates only after evidence: Run/Handoff Receipt, stronger Stage/ArtifactRef flow, event-driven wake signals, provider fallback policy, staging retention/compaction, richer memory conflict/consolidation.
+
+### 2.0+
 
 Potentially breaking architecture: production sandbox backend, remote/federated Runtime, multi-user organization policy, preemptive priority scheduling, redesigned public API major version.
 
@@ -182,3 +184,19 @@ Before accepting a proposal, ask:
 10. Can it wait for the next minor/major version?
 
 If questions 1–3 do not justify Runtime ownership, do not add it.
+
+
+## 11. Implementation-level borrowing rules
+
+Code-level ideas from Owl Lab may improve OWL Runtime without becoming new public surfaces. Prefer internal hardening when possible:
+
+- keep Runtime control metadata out of provider/business payloads;
+- preserve native value types across exact Task references;
+- expose capability health/integrity through existing discovery/health surfaces;
+- require accumulated evidence before escalating remediation;
+- separate locator/executor/verifier/event-source/gateway responsibilities in app adapters;
+- carry coordinate-frame provenance for model-assisted visual actions;
+- use cooperative cancellation before any future resource preemption;
+- persist benchmark/release evidence with version/SHA provenance.
+
+These implementation improvements do **not** expand the three-surface 1.1 protocol budget. A new public contract still requires independent consumer evidence and architecture review.
