@@ -7,6 +7,8 @@ This directory is organized by document purpose rather than release chronology.
 - [Repository boundaries](architecture/repository-boundaries.md)
 - [Runtime daemon and MCP adapter boundary](architecture/runtime-daemon-boundary.md)
 - [Architecture overview](architecture/overview.md)
+- [Architecture constitution](architecture/constitution.md)
+- [Owl Lab philosophy alignment](architecture/owl-lab-philosophy-alignment.md)
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
 - [v1.0 scope lock](roadmap/1.0-scope-lock.md)
@@ -22,6 +24,8 @@ Long-lived system design and boundaries.
 - [Layers](architecture/layers.md)
 - [Concurrency and ownership](architecture/concurrency-and-ownership.md)
 - [Runtime identity](architecture/runtime-identity.md)
+- [Architecture constitution](architecture/constitution.md)
+- [Owl Lab philosophy alignment](architecture/owl-lab-philosophy-alignment.md)
 
 ## Specifications
 
@@ -77,6 +81,7 @@ Contracts intended to remain stable across implementations.
 
 - [v1.0](roadmap/v1.0.md)
 - [Post-1.0](roadmap/post-1.0.md)
+- [Evolution discipline](roadmap/evolution-discipline.md)
 - [Release checklist](roadmap/release-checklist.md)
 
 ## Architecture Decision Records

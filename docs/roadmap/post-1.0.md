@@ -1,6 +1,10 @@
 # Post-1.0 Directions
 
-These are intentionally not release blockers for AgentOS Runtime 1.0.
+These are intentionally not release blockers for OWL Runtime 1.0.
+
+Post-1.0 work is governed by the [Architecture Constitution](../architecture/constitution.md), [Owl Lab philosophy alignment audit](../architecture/owl-lab-philosophy-alignment.md), and [Evolution Discipline](evolution-discipline.md). Owl Lab is an architecture research source, not a feature checklist. Ideas enter Runtime only when they become generic execution invariants backed by consumer evidence.
+
+Priority research candidates for 1.1 are intentionally capped at three protocol surfaces: GroundedState v1, RemediationReceipt v1, and a Governed Capability Manifest v1. They remain proposals until Computer MCP or OWL Worker provides concrete evidence.
 
 - event-driven adapters beyond polling
 - additional desktop messaging adapters
@@ -16,4 +20,4 @@ These are intentionally not release blockers for AgentOS Runtime 1.0.
 - pluggable secret managers
 - distributed tracing and metrics exporters
 
-New ideas should be evaluated against the 1.0 stability boundary before expanding the Primitive ABI.
+New ideas must pass the Evolution Discipline review before entering Runtime. Prefer a receipt/field/contract over a new subsystem, and prefer a consumer-side solution when the invariant is not generic.
