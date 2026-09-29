@@ -30,9 +30,13 @@ const {
   workflowDiscoveryParameterName,
 } = await import("../src/skills/workflowSkillDiscovery.js");
 const {
+  compileSkillCandidateTest,
   getSkillCandidates,
+  inspectSkillCandidate,
+  promoteSkillCandidate,
   submitSkillCandidate,
   userSkillDigest,
+  validateSkillCandidate,
   validateUserSkillManifest,
 } = await import("../src/skills/userSkillRuntime.js");
 const { InProcessRuntimeClient } = await import(
@@ -225,6 +229,46 @@ try {
   assert.deepEqual(refreshedProposal.governance.exactDigestCandidateIds, []);
   assert.equal(refreshedProposal.readyForSubmit, false);
 
+  const validatedCandidate = (await validateSkillCandidate({
+    candidateId: explicit.candidate.id,
+    expectedDigest: explicit.candidate.currentDigest,
+  })) as any;
+  assert.equal(validatedCandidate.valid, true);
+
+  const compiled = (await compileSkillCandidateTest({
+    candidateId: explicit.candidate.id,
+    expectedDigest: explicit.candidate.currentDigest,
+    inputs: { step2_max_count: 5 },
+  })) as any;
+  const ranCandidate = await runPersistentTask(compiled.task.id, {
+    maxConcurrency: 2,
+    failFast: true,
+  });
+  assert.equal(ranCandidate.status, "completed");
+
+  const inspection = (await inspectSkillCandidate({
+    candidateId: explicit.candidate.id,
+    testTaskId: compiled.task.id,
+  })) as any;
+  assert.equal(inspection.readiness.promotable, true);
+
+  const promoted = (await promoteSkillCandidate({
+    candidateId: explicit.candidate.id,
+    expectedDigest: explicit.candidate.currentDigest,
+    testTaskId: compiled.task.id,
+    confirm: true,
+  })) as any;
+  assert.equal(promoted.promoted, true);
+
+  const afterPromotion = (await discoverWorkflowSkillCandidates()) as any;
+  const installedProposal = afterPromotion.proposals[0];
+  assert.equal(installedProposal.proposalId, proposal.proposalId);
+  assert.equal(installedProposal.governance.state, "installed");
+  assert.equal(installedProposal.governance.installed.enabled, true);
+  assert.equal(installedProposal.governance.installed.activeVersion, "0.1.0");
+  assert.ok(installedProposal.governance.installed.versions.includes("0.1.0"));
+  assert.equal(installedProposal.readyForSubmit, false);
+
   const secretManifest = structuredClone(proposal.manifest);
   secretManifest.id = "user.workflow.secret-regression";
   secretManifest.steps[0].args.api_key =
@@ -261,6 +305,8 @@ try {
         stableProposalIdentity: true,
         candidateGovernanceDedup: true,
         evidenceRefreshDetected: true,
+        installedGovernanceDetected: true,
+        promotionStillUsesGovernedPath: true,
         embeddedSecretBlocked: true,
       },
       null,
