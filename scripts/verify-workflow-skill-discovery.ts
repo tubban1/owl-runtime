@@ -280,7 +280,7 @@ try {
   assert.equal(ranCandidate.status, "completed");
 
   const inspection = (await inspectSkillCandidate({
-    candidateId: explicit.candidate.id,
+    candidateId: refreshedCandidate.candidate.id,
     testTaskId: compiled.task.id,
   })) as any;
   assert.equal(inspection.readiness.promotable, true);
