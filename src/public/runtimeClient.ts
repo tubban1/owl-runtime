@@ -36,9 +36,11 @@ import {
   createPersistentTask,
   createPersistentTaskFromActivation,
   deletePersistentTask,
+  failPersistentTaskAfterApprovalDenial,
   getPersistentTaskStatus,
   listPersistentTasks,
   requestTaskPause,
+  resumePersistentTaskAfterApproval,
   resolvePersistentTaskStep,
   runPersistentTask,
 } from "../tasks/taskRuntime.js";
@@ -618,11 +620,27 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
   }
 
   async approve(approvalId: string, confirm: boolean): Promise<unknown> {
-    return await approveApproval(approvalId, confirm);
+    const approval = await approveApproval(approvalId, confirm);
+    if (!approval.ownerTaskId || !approval.ownerStepId) {
+      return { approval, resumed: null };
+    }
+    const resume = await resumePersistentTaskAfterApproval(
+      approval.ownerTaskId,
+      approval.id,
+    );
+    return { approval, resume };
   }
 
   async deny(approvalId: string, confirm: boolean): Promise<unknown> {
-    return await denyApproval(approvalId, confirm);
+    const approval = await denyApproval(approvalId, confirm);
+    if (!approval.ownerTaskId || !approval.ownerStepId) {
+      return { approval, task: null };
+    }
+    const task = await failPersistentTaskAfterApprovalDenial(
+      approval.ownerTaskId,
+      approval.id,
+    );
+    return { approval, task };
   }
 
   async process(request: ProcessRequest): Promise<unknown> {
