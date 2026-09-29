@@ -1129,8 +1129,22 @@ export async function runPersistentTask(
   if (task.status === "completed") {
     await indexTaskEpisode(task).catch(() => undefined);
     return {
+      schemaVersion: 1 as const,
+      id: task.id,
+      label: task.label,
+      status: task.status,
+      runCount: task.runCount,
+      wavesExecuted: 0,
+      runDurationMs: 0,
+      runResults: [],
+      executionRevision: task.executionRevision
+        ? {
+            version: task.executionRevision.version,
+            digest: task.executionRevision.digest,
+          }
+        : null,
+      summary: summarizeTask(task, true),
       alreadyCompleted: true,
-      ...summarizeTask(task, true),
     };
   }
   if (task.status === "cancelled") {
