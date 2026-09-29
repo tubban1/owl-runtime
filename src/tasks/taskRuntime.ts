@@ -1280,6 +1280,12 @@ export async function runPersistentTask(
       wavesExecuted,
       runDurationMs: Date.now() - runStartedAt,
       runResults,
+      executionRevision: task.executionRevision
+        ? {
+            version: task.executionRevision.version,
+            digest: task.executionRevision.digest,
+          }
+        : null,
       summary: summarizeTask(task, false),
     };
   } finally {
