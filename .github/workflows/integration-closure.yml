@@ -9,6 +9,7 @@ on:
       - feature/1.x-approval-resume
       - feature/1.x-typed-public-dto
       - feature/1.x-schedule-pause-resume
+      - feature/1.x-storage-foundation
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -73,6 +74,9 @@ jobs:
 
       - name: Verify Schedule Pause Resume
         run: npm run verify:schedule-pause-resume
+
+      - name: Verify Storage Foundation
+        run: npm run verify:storage-foundation
 
       - name: Build Public Types
         run: npm run build:types
