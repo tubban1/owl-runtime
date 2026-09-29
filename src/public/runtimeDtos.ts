@@ -134,6 +134,7 @@ export type PublicRunReceiptV1 = {
   runResults: Array<Record<string, unknown>>;
   executionRevision: PublicExecutionRevisionRefV1 | null;
   summary: PublicTaskDetailV1;
+  alreadyCompleted?: boolean;
 };
 
 export type PublicApprovalV1 = {
