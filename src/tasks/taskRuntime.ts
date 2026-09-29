@@ -41,6 +41,10 @@ import {
 } from "./taskStore.js";
 import type { Observation } from "../observation/observationAbi.js";
 import {
+  assertExecutionRevisionDigest,
+  createExecutionRevision,
+} from "./executionRevision.js";
+import {
   uncertainVerificationReceipt,
   verifyObservation,
   type VerificationReceipt,
@@ -145,6 +149,12 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
     status: task.status,
     ownerSessionId: task.ownerSessionId ?? null,
     provenance: task.provenance ?? null,
+    executionRevision: task.executionRevision
+      ? {
+          version: task.executionRevision.version,
+          digest: task.executionRevision.digest,
+        }
+      : null,
     executionTarget: normalizeExecutionTarget(task.executionTarget),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -384,6 +394,13 @@ export async function createPersistentTask(
   const executionTarget = assertExecutionTargetAvailable(
     options?.executionTarget ?? currentExecutionContext().executionTarget,
   );
+  const executionRevision = createExecutionRevision({
+    label,
+    steps,
+    maxConcurrency: options?.maxConcurrency,
+    failFast: options?.failFast,
+    executionTarget,
+  });
   const now = new Date().toISOString();
   const id = newTaskId();
   const stage = await ensureTaskStage(id);
@@ -393,6 +410,7 @@ export async function createPersistentTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    executionRevision,
     executionTarget,
     createdAt: now,
     updatedAt: now,
@@ -766,6 +784,7 @@ export async function runPersistentTask(
     failFast?: boolean;
     maxWaves?: number;
     timeBudgetMs?: number;
+    expectedRevisionDigest?: string;
   },
 ) {
   if (activeRuns.has(id)) {
@@ -773,6 +792,10 @@ export async function runPersistentTask(
   }
 
   let task = await loadTask(id);
+  assertExecutionRevisionDigest(
+    task.executionRevision?.digest,
+    options?.expectedRevisionDigest,
+  );
   if (task.status === "completed") {
     await indexTaskEpisode(task).catch(() => undefined);
     return {
