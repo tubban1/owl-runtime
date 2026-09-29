@@ -3577,6 +3577,26 @@ export async function getCapabilityManifest(goal = "") {
         writesCandidateStore: false,
         autoPromotes: false,
       },
+      publicEventJournal: {
+        version: 1,
+        status: "candidate",
+        clientInterface: "RuntimeEventRuntimeClient",
+        namespaces: ["events.list"],
+        delivery: "durable-cursor-polling",
+        ordering: "global-monotonic-sequence",
+        replay: "at-least-once-safe",
+      },
+      agentRequestProducer: {
+        version: 1,
+        status: "candidate",
+        producer: "user-skill-candidate-validation",
+        eventTypes: [
+          "agent_request.proposed",
+          "agent_request.withdrawn",
+        ],
+        embeddedLlm: false,
+        desktopInboxOwnedByRuntime: false,
+      },
     },
     architecture: {
       name: identity.productName,
@@ -3631,6 +3651,10 @@ export async function getCapabilityManifest(goal = "") {
         "1.x candidate: digest-bound Candidate → Persistent Test Task → M2/Verifier gates → immutable User Skill Registry",
       workflowSkillDiscovery:
         "1.x candidate: repeated verified M2 Primitive workflows → read-only draft proposal → explicit Candidate submit",
+      publicEventJournal:
+        "1.x candidate: encrypted durable global public journal with monotonic sequence, stable cursor, bounded retention and explicit retention-gap errors",
+      agentRequestProducer:
+        "1.x candidate: deterministic User Skill validation state → transactional outbox → AgentRequest public events; no embedded LLM",
       globalEpisodicIndex: "v0.9.9 encrypted terminal-task experience index",
       hybridRecall:
         "v0.9.9 unified episodic + semantic lexical/vector recall",

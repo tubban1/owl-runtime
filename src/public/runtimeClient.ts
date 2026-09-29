@@ -23,6 +23,7 @@ import {
   submitSkillCandidate,
   uninstallUserSkill,
   validateSkillCandidate,
+  reconcileSkillCandidateAgentRequestOutbox,
 } from "../skills/userSkillRuntime.js";
 import {
   discoverWorkflowSkillCandidates,
@@ -59,6 +60,18 @@ import {
   assertExecutionTargetAvailable,
   getExecutionTargetManifest,
 } from "../runtime/executionTarget.js";
+import {
+  listPublicRuntimeEvents,
+  type RuntimeEventListRequest,
+  type RuntimeEventListResponse,
+} from "../runtime/publicEventJournal.js";
+export type {
+  RuntimePublicEvent,
+  RuntimePublicEventType,
+  RuntimeEventListRequest,
+  RuntimeEventListResponse,
+  RuntimeEventRetention,
+} from "../runtime/publicEventJournal.js";
 
 export const RUNTIME_PUBLIC_API_VERSION = "0.1" as const;
 
@@ -272,6 +285,12 @@ async function withPublicExecutionTarget<T>(
   );
 }
 
+export interface RuntimeEventRuntimeClient {
+  listEvents(
+    request?: RuntimeEventListRequest,
+  ): Promise<RuntimeEventListResponse>;
+}
+
 export interface WorkflowDiscoveryRuntimeClient {
   discoverWorkflowSkillCandidates(
     request?: WorkflowSkillDiscoveryRequest,
@@ -299,6 +318,7 @@ export interface UserSkillRuntimeClient {
 }
 
 export type RuntimeClientWithUserSkills = RuntimeClient & UserSkillRuntimeClient;
+export type RuntimeClientWithEvents = RuntimeClient & RuntimeEventRuntimeClient;
 export type RuntimeClientWithWorkflowDiscovery =
   RuntimeClientWithUserSkills & WorkflowDiscoveryRuntimeClient;
 
@@ -343,13 +363,20 @@ export interface RuntimeClient {
  * External products MUST depend on RuntimeClient semantics, not import Runtime
  * internals. IPC/HTTP implementations should preserve this interface.
  */
-export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient {
+export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient {
   async info(): Promise<RuntimeClientInfo> {
     return {
       apiVersion: RUNTIME_PUBLIC_API_VERSION,
       runtimeVersion: RUNTIME_VERSION,
       transport: "in-process",
     };
+  }
+
+  async listEvents(
+    request: RuntimeEventListRequest = {},
+  ): Promise<RuntimeEventListResponse> {
+    await reconcileSkillCandidateAgentRequestOutbox();
+    return await listPublicRuntimeEvents(request);
   }
 
   async getCapabilities(goal = ""): Promise<unknown> {

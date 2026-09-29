@@ -1,4 +1,5 @@
 import type { VerificationSpec } from "../verification/verifier.js";
+import type { RuntimePublicEventDraft } from "../runtime/publicEventJournal.js";
 
 export const USER_SKILL_ABI_VERSION = 1 as const;
 
@@ -120,6 +121,15 @@ export type SkillPromotionReceipt = {
   promotedAt: string;
 };
 
+export type SkillCandidatePublicEventOutboxEntry = {
+  version: 1;
+  event: RuntimePublicEventDraft;
+  state: "pending" | "published";
+  publishedSequence?: number;
+  publishedCursor?: string;
+  publishedAt?: string;
+};
+
 export type SkillCandidateRecord = {
   version: 1;
   id: string;
@@ -131,6 +141,7 @@ export type SkillCandidateRecord = {
   revisions: SkillCandidateRevision[];
   validation?: SkillCandidateValidationReport;
   tests: SkillCandidateTestBinding[];
+  publicEventOutbox?: SkillCandidatePublicEventOutboxEntry[];
   promotion?: SkillPromotionReceipt;
   dismissedAt?: string;
 };

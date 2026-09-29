@@ -10,7 +10,9 @@ import {
   InProcessRuntimeClient,
   RUNTIME_PUBLIC_API_VERSION,
   type RuntimeClient,
+  type RuntimeEventRuntimeClient,
   type UserSkillRuntimeClient,
+  type WorkflowDiscoveryRuntimeClient,
 } from "./runtimeClient.js";
 import {
   RUNTIME_RPC_METHODS,
@@ -76,7 +78,10 @@ function unauthorized(res: any, requestId?: string) {
 
 export function registerRuntimeHttpApi(
   app: Express,
-  client: RuntimeClient & Partial<UserSkillRuntimeClient> = new InProcessRuntimeClient(),
+  client: RuntimeClient &
+    Partial<UserSkillRuntimeClient> &
+    Partial<WorkflowDiscoveryRuntimeClient> &
+    Partial<RuntimeEventRuntimeClient> = new InProcessRuntimeClient(),
 ) {
   app.get("/runtime/v0.1/info", async (req, res) => {
     if (!apiTokenAuthorized(req)) {

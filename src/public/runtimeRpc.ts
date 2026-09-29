@@ -8,6 +8,8 @@ import type {
   ResolveTaskStepRequest,
   RunTaskRequest,
   RuntimeClient,
+  RuntimeEventRuntimeClient,
+  RuntimeEventListRequest,
   UserSkillRuntimeClient,
   WorkflowDiscoveryRuntimeClient,
   WorkflowSkillDiscoveryRequest,
@@ -67,6 +69,7 @@ export const RUNTIME_RPC_METHODS = [
   "approvals.deny",
   "process",
   "health",
+  "events.list",
   "diagnostics.get",
 ] as const;
 
@@ -126,6 +129,17 @@ function requireUserSkillRuntimeClient(
   return client as RuntimeClient & UserSkillRuntimeClient;
 }
 
+function requireRuntimeEventRuntimeClient(
+  client: RuntimeClient & Partial<RuntimeEventRuntimeClient>,
+): RuntimeEventRuntimeClient {
+  if (typeof client.listEvents !== "function") {
+    throw new Error(
+      "RUNTIME_CAPABILITY_UNAVAILABLE: public-event-journal extension is not implemented by this RuntimeClient.",
+    );
+  }
+  return client as RuntimeClient & RuntimeEventRuntimeClient;
+}
+
 function requireWorkflowDiscoveryRuntimeClient(
   client: RuntimeClient & Partial<WorkflowDiscoveryRuntimeClient>,
 ): WorkflowDiscoveryRuntimeClient {
@@ -140,7 +154,8 @@ function requireWorkflowDiscoveryRuntimeClient(
 export async function invokeRuntimeRpc(
   client: RuntimeClient &
     Partial<UserSkillRuntimeClient> &
-    Partial<WorkflowDiscoveryRuntimeClient>,
+    Partial<WorkflowDiscoveryRuntimeClient> &
+    Partial<RuntimeEventRuntimeClient>,
   method: RuntimeRpcMethod,
   params?: unknown,
 ): Promise<unknown> {
@@ -254,6 +269,10 @@ export async function invokeRuntimeRpc(
       return await client.process(object as ProcessRequest);
     case "health":
       return await client.health(object as HealthRequest);
+    case "events.list":
+      return await requireRuntimeEventRuntimeClient(client).listEvents(
+        object as RuntimeEventListRequest,
+      );
     case "diagnostics.get":
       return await client.getDiagnostics(object);
   }

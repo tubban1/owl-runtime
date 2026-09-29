@@ -21,6 +21,12 @@ import {
 import { readGlobalEpisode } from "../runtime/episodicStore.js";
 import { authorizeSkill } from "../policy/approvalPolicy.js";
 import { injectTestFault } from "../runtime/faultInjection.js";
+import {
+  AGENT_REQUEST_PRODUCER_CONTRACT_VERSION,
+  appendPublicRuntimeEvent,
+  type RuntimeAgentRequestProposedDraft,
+  type RuntimePublicEventDraft,
+} from "../runtime/publicEventJournal.js";
 import { resourceArbiter } from "../runtime/resourceArbiter.js";
 import { verificationSpecSchema } from "../verification/verifier.js";
 import {
@@ -164,6 +170,222 @@ export function userSkillDigest(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(stableValue(value)))
     .digest("hex");
+}
+
+
+const SEMANTIC_REPAIR_ERROR_CODES = new Set([
+  "USER_SKILL_PRIMITIVE_ABI_UNSUPPORTED",
+  "USER_SKILL_PRIMITIVE_OP_INVALID",
+  "USER_SKILL_INPUT_REFERENCE_UNKNOWN",
+  "USER_SKILL_STEP_REFERENCE_UNKNOWN",
+  "USER_SKILL_EMBEDDED_SECRET_BLOCKED",
+]);
+
+function agentRequestHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function semanticRepairErrorCodes(
+  report: SkillCandidateValidationReport,
+): string[] {
+  return [
+    ...new Set(
+      report.errors
+        .map((error) => error.code)
+        .filter((code) => SEMANTIC_REPAIR_ERROR_CODES.has(code)),
+    ),
+  ].sort();
+}
+
+function candidateAgentRequestIdentity(record: SkillCandidateRecord) {
+  const reasonCode = "VALIDATION_FAILED";
+  const seed = [
+    "agent-request",
+    AGENT_REQUEST_PRODUCER_CONTRACT_VERSION,
+    "skill_candidate",
+    record.id,
+    record.currentDigest,
+    reasonCode,
+  ].join("|");
+  const proposalId = "proposal_skill_" + agentRequestHash(seed).slice(0, 24);
+  const dedupeKey = [
+    "runtime",
+    "agent_request_v" + AGENT_REQUEST_PRODUCER_CONTRACT_VERSION,
+    "skill_candidate",
+    record.id,
+    "r" + record.revision,
+    record.currentDigest.slice(0, 12),
+    "validation_failed",
+  ].join(":");
+  return { proposalId, dedupeKey, reasonCode };
+}
+
+function eventIdFor(
+  eventType: RuntimePublicEventDraft["eventType"],
+  proposalId: string,
+): string {
+  return (
+    "evt_agent_" +
+    agentRequestHash(
+      [
+        "agent-request-event",
+        AGENT_REQUEST_PRODUCER_CONTRACT_VERSION,
+        eventType,
+        proposalId,
+      ].join("|"),
+    ).slice(0, 24)
+  );
+}
+
+function candidateOutbox(record: SkillCandidateRecord) {
+  return (record.publicEventOutbox ??= []);
+}
+
+function enqueueCandidatePublicEvent(
+  record: SkillCandidateRecord,
+  event: RuntimePublicEventDraft,
+): boolean {
+  const outbox = candidateOutbox(record);
+  if (outbox.some((entry) => entry.event.eventId === event.eventId)) {
+    return false;
+  }
+  outbox.push({ version: 1, event, state: "pending" });
+  return true;
+}
+
+function proposedEventForValidation(
+  record: SkillCandidateRecord,
+  report: SkillCandidateValidationReport,
+): RuntimeAgentRequestProposedDraft | null {
+  const errorCodes = semanticRepairErrorCodes(report);
+  if (report.valid || errorCodes.length === 0) return null;
+
+  const { proposalId, dedupeKey, reasonCode } =
+    candidateAgentRequestIdentity(record);
+  const priority =
+    errorCodes.includes("USER_SKILL_PRIMITIVE_ABI_UNSUPPORTED") ||
+    errorCodes.includes("USER_SKILL_EMBEDDED_SECRET_BLOCKED")
+      ? "high"
+      : "normal";
+
+  return {
+    eventType: "agent_request.proposed",
+    eventId: eventIdFor("agent_request.proposed", proposalId),
+    proposalId,
+    requestType: "skill.repair",
+    priority,
+    subject: {
+      kind: "skill_candidate",
+      id: record.id,
+      revision: String(record.revision),
+    },
+    reasonCode,
+    errorCodes,
+    contextRefs: [
+      {
+        kind: "validation_report",
+        id:
+          "validation_" +
+          record.id +
+          "_r" +
+          record.revision +
+          "_" +
+          record.currentDigest.slice(0, 12),
+      },
+    ],
+    allowedActions: [
+      "candidate.inspect",
+      "candidate.revise",
+      "candidate.validate",
+    ],
+    requiresUserConfirmation: true,
+    dedupeKey,
+    occurredAt: report.validatedAt,
+  };
+}
+
+function enqueueWithdrawalsForCurrentIssue(
+  record: SkillCandidateRecord,
+  occurredAt = new Date().toISOString(),
+): boolean {
+  let changed = false;
+  const outbox = candidateOutbox(record);
+  const currentRevision = String(record.revision);
+  const proposals = outbox
+    .map((entry) => entry.event)
+    .filter(
+      (event): event is RuntimeAgentRequestProposedDraft =>
+        event.eventType === "agent_request.proposed" &&
+        event.subject.kind === "skill_candidate" &&
+        event.subject.id === record.id &&
+        event.subject.revision === currentRevision,
+    );
+
+  for (const proposal of proposals) {
+    const withdrawalId = eventIdFor(
+      "agent_request.withdrawn",
+      proposal.proposalId,
+    );
+    if (outbox.some((entry) => entry.event.eventId === withdrawalId)) {
+      continue;
+    }
+    changed =
+      enqueueCandidatePublicEvent(record, {
+        eventType: "agent_request.withdrawn",
+        eventId: withdrawalId,
+        proposalId: proposal.proposalId,
+        subject: proposal.subject,
+        reasonCode: "ISSUE_RESOLVED",
+        dedupeKey: proposal.dedupeKey,
+        occurredAt,
+      }) || changed;
+  }
+  return changed;
+}
+
+function syncValidationAgentRequest(
+  record: SkillCandidateRecord,
+  report: SkillCandidateValidationReport,
+): void {
+  const proposed = proposedEventForValidation(record, report);
+  if (proposed) {
+    enqueueCandidatePublicEvent(record, proposed);
+    return;
+  }
+  enqueueWithdrawalsForCurrentIssue(record, report.validatedAt);
+}
+
+async function flushCandidateAgentRequestOutboxLocked(
+  record: SkillCandidateRecord,
+): Promise<void> {
+  let changed = false;
+  for (const entry of candidateOutbox(record)) {
+    if (entry.state === "published") continue;
+    const published = await appendPublicRuntimeEvent(entry.event);
+    injectTestFault("user_skill_agent_request_after_journal_append");
+    entry.state = "published";
+    entry.publishedSequence = published.sequence;
+    entry.publishedCursor = published.cursor;
+    entry.publishedAt = new Date().toISOString();
+    changed = true;
+  }
+  if (changed) {
+    await writeSkillCandidate(record);
+  }
+}
+
+export async function reconcileSkillCandidateAgentRequestOutbox(): Promise<void> {
+  const candidates = await listSkillCandidates();
+  for (const candidate of candidates) {
+    await withSkillGovernanceResources(
+      "skill-candidate.agent-request-outbox",
+      candidateResource(candidate.id),
+      async () => {
+        const current = await readSkillCandidate(candidate.id);
+        await flushCandidateAgentRequestOutboxLocked(current);
+      },
+    );
+  }
 }
 
 function newCandidateId(digest: string): string {
@@ -733,6 +955,7 @@ export async function reviseSkillCandidate(input: {
         return { idempotent: true, candidate: record };
       }
       const now = new Date().toISOString();
+      enqueueWithdrawalsForCurrentIssue(record, now);
       record.revision += 1;
       record.currentDigest = digest;
       record.revisions.push({
@@ -743,6 +966,7 @@ export async function reviseSkillCandidate(input: {
       });
       record.validation = undefined;
       await writeSkillCandidate(record);
+      await flushCandidateAgentRequestOutboxLocked(record);
       return { idempotent: false, candidate: record };
     },
   );
@@ -785,7 +1009,10 @@ export async function validateSkillCandidate(input: {
         currentManifest(record),
       );
       record.validation = result.report;
+      syncValidationAgentRequest(record, result.report);
       await writeSkillCandidate(record);
+      injectTestFault("user_skill_agent_request_after_state_commit");
+      await flushCandidateAgentRequestOutboxLocked(record);
       return result.report;
     },
   );
@@ -811,9 +1038,12 @@ export async function dismissSkillCandidate(input: {
       if (record.status === "promoted") {
         throw new Error("USER_SKILL_CANDIDATE_ALREADY_PROMOTED");
       }
+      const now = new Date().toISOString();
+      enqueueWithdrawalsForCurrentIssue(record, now);
       record.status = "dismissed";
-      record.dismissedAt = new Date().toISOString();
+      record.dismissedAt = now;
       await writeSkillCandidate(record);
+      await flushCandidateAgentRequestOutboxLocked(record);
       return record;
     },
   );

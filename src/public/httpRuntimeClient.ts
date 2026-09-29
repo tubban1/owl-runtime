@@ -11,6 +11,9 @@ import {
   type RunTaskRequest,
   type RuntimeClient,
   type RuntimeClientInfo,
+  type RuntimeEventRuntimeClient,
+  type RuntimeEventListRequest,
+  type RuntimeEventListResponse,
   type UserSkillRuntimeClient,
   type WorkflowDiscoveryRuntimeClient,
   type WorkflowSkillDiscoveryRequest,
@@ -69,7 +72,7 @@ export type RuntimeInvokeOptions = {
   signal?: AbortSignal;
 };
 
-export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient {
+export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient {
   private readonly baseUrl: string;
   private readonly sessionId: string;
   private readonly token?: string;
@@ -180,6 +183,12 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
       ...info,
       transport: "http",
     };
+  }
+
+  async listEvents(
+    request: RuntimeEventListRequest = {},
+  ): Promise<RuntimeEventListResponse> {
+    return (await this.rpc("events.list", request)) as RuntimeEventListResponse;
   }
 
   async getCapabilities(goal = ""): Promise<unknown> {
