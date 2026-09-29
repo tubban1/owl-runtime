@@ -3605,6 +3605,15 @@ export async function getCapabilityManifest(goal = "") {
         requestIdRole: "cancellation-attempt-identity",
         idempotencyKeyRole: "logical-consequential-request-identity",
       },
+      executionRevision: {
+        version: 1,
+        status: "candidate",
+        model: "immutable-task-bound-digest",
+        create: "tasks.create",
+        execute: "tasks.run.expectedRevisionDigest",
+        mutationAfterCreate: false,
+        purpose: "bind-tested-and-executed-plan",
+      },
     },
     architecture: {
       name: identity.productName,
