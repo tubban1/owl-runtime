@@ -7,6 +7,11 @@ import { runtimeMode } from "../runtime/runtimePaths.js";
 import { withCancellationSignal } from "../runtime/cancellation.js";
 import { runtimeRequestCancellationRegistry } from "../runtime/requestCancellationRegistry.js";
 import {
+  emitRuntimeProviderTelemetry,
+  runtimeProviderTelemetry,
+  RUNTIME_TELEMETRY_MAX_BATCH,
+} from "../observability/providerTelemetry.js";
+import {
   InProcessRuntimeClient,
   RUNTIME_PUBLIC_API_VERSION,
   type RuntimeClient,
@@ -90,6 +95,37 @@ export function registerRuntimeHttpApi(
     });
   });
 
+  app.get("/runtime/v0.1/telemetry", (req, res) => {
+    if (!apiTokenAuthorized(req)) {
+      unauthorized(res);
+      return;
+    }
+    const after = Number(req.query.after ?? "0");
+    const limit = Number(req.query.limit ?? String(RUNTIME_TELEMETRY_MAX_BATCH));
+    if (
+      !Number.isSafeInteger(after) ||
+      after < 0 ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > RUNTIME_TELEMETRY_MAX_BATCH
+    ) {
+      res.status(400).json({
+        ok: false,
+        apiVersion: RUNTIME_PUBLIC_API_VERSION,
+        error: {
+          code: "INVALID_REQUEST",
+          message: `after must be >= 0 and limit must be 1-${RUNTIME_TELEMETRY_MAX_BATCH}.`,
+        },
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      apiVersion: RUNTIME_PUBLIC_API_VERSION,
+      result: runtimeProviderTelemetry.list(after, limit),
+    });
+  });
+
   app.post("/runtime/v0.1/cancel", async (req, res) => {
     const apiRequestId =
       req.header("x-owl-request-id")?.trim() ||
@@ -133,6 +169,8 @@ export function registerRuntimeHttpApi(
 
     let sessionId: string | undefined;
     let requestFinished = false;
+    let rpcMethod: string | undefined;
+    const requestStartedAt = Date.now();
 
     try {
       if (!apiTokenAuthorized(req)) {
@@ -142,6 +180,7 @@ export function registerRuntimeHttpApi(
 
       sessionId = logicalSessionId(req);
       const parsed = rpcRequestSchema.parse(req.body);
+      rpcMethod = parsed.method;
       const active = runtimeRequestCancellationRegistry.begin({
         requestId,
         sessionId,
@@ -213,6 +252,21 @@ export function registerRuntimeHttpApi(
       const message =
         error instanceof Error ? error.message : String(error);
       const code = errorCode(error, message);
+      try {
+        emitRuntimeProviderTelemetry({
+          eventType: "runtime.rpc.failed",
+          severity: code === "OPERATION_CANCELLED" ? "warn" : "error",
+          component: "runtime.http",
+          operation: rpcMethod ?? "unknown",
+          errorCode: code,
+          errorFingerprint: `runtime_rpc:${rpcMethod ?? "unknown"}:${code}`,
+          durationMs: Date.now() - requestStartedAt,
+          recoverable: code === "OPERATION_CANCELLED",
+          correlationId: requestId,
+        });
+      } catch {
+        // Telemetry must never alter the Runtime request outcome.
+      }
 
       res.status(
         code === "RUNTIME_SESSION_ID_REQUIRED" ? 400 :
