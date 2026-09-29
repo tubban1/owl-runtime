@@ -3647,6 +3647,15 @@ export async function getCapabilityManifest(goal = "") {
         ],
         opaqueInternals: ["storage", "staging", "memory"],
       },
+      schedulePauseResume: {
+        version: 1,
+        status: "candidate",
+        pause: "schedules.pause",
+        resume: "schedules.resume",
+        identityPreserved: true,
+        defaultMissedRunPolicy: "skip",
+        explicitCatchUp: true,
+      },
     },
     architecture: {
       name: identity.productName,
