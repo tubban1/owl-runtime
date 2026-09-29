@@ -69,7 +69,8 @@
     "verify:execution-revision": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-revision.ts",
     "verify:execution-activation": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-activation.ts",
     "verify:approval-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-approval-resume.ts",
-    "verify:public-dto": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-dto.ts"
+    "verify:public-dto": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-dto.ts",
+    "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
