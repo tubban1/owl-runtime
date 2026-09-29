@@ -44,6 +44,8 @@ export function taskHealth(
       return signal({ ...common, state: "broken", code: "task_failed", summary: "Task execution failed.", actionable: true, details: { label: task.label ?? null } });
     case "blocked":
       return signal({ ...common, state: "needs_attention", code: "task_blocked", summary: "Task is blocked and needs review or an external condition to be resolved.", actionable: true, details: { label: task.label ?? null } });
+    case "waiting_approval":
+      return signal({ ...common, state: "needs_attention", code: "task_waiting_approval", summary: "Task is paused at an exact approval boundary.", actionable: true, details: { label: task.label ?? null } });
     case "paused":
       return signal({ ...common, state: "paused", code: "task_paused", summary: "Task is paused.", actionable: true, details: { label: task.label ?? null } });
     case "cancelled":
