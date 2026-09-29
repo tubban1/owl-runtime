@@ -655,6 +655,26 @@ async function finalizeCompleted(
   });
 }
 
+async function finalizeUncertain(
+  input: RuntimeRequestReplayInput,
+  requestDigest: string,
+): Promise<void> {
+  await withRecordLock(input.sessionId, input.idempotencyKey, async () => {
+    const record = await readRecord(input.sessionId, input.idempotencyKey);
+    if (!record || record.requestDigest !== requestDigest) return;
+    const now = new Date().toISOString();
+    await writeRecord({
+      ...record,
+      state: "uncertain",
+      result: undefined,
+      error: undefined,
+      terminalState: undefined,
+      uncertainAt: now,
+      updatedAt: now,
+    });
+  });
+}
+
 async function finalizeFailed(
   input: RuntimeRequestReplayInput,
   requestDigest: string,
@@ -735,22 +755,35 @@ export async function withRuntimeRequestReplay<T>(
       );
     }
 
+    let result: T;
     try {
-      const result = await operation();
-      await finalizeCompleted(input, requestDigest, result);
-      return {
-        result,
-        originalRequestId: input.requestId,
-        source: "executed" as const,
-      };
+      result = await operation();
     } catch (error) {
-      await finalizeFailed(input, requestDigest, error).catch(
-        (persistError) => {
-          throw persistError;
-        },
-      );
+      try {
+        await finalizeFailed(input, requestDigest, error);
+      } catch {
+        await finalizeUncertain(input, requestDigest).catch(() => undefined);
+        throw new Error(
+          "IDEMPOTENCY_RECEIPT_PERSIST_FAILED: Runtime request failed but its terminal replay receipt could not be committed; outcome requires reconciliation.",
+        );
+      }
       throw error;
     }
+
+    try {
+      await finalizeCompleted(input, requestDigest, result);
+    } catch {
+      await finalizeUncertain(input, requestDigest).catch(() => undefined);
+      throw new Error(
+        "IDEMPOTENCY_RECEIPT_PERSIST_FAILED: Runtime operation returned but its durable completion receipt could not be committed; outcome requires reconciliation.",
+      );
+    }
+
+    return {
+      result,
+      originalRequestId: input.requestId,
+      source: "executed" as const,
+    };
   })();
 
   activeExecutions.set(activeKey, { requestDigest, promise });
