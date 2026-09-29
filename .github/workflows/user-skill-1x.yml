@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - platform/contracts-v1
+      - feature/1.x-user-skill-registry
 
 permissions:
   contents: read
