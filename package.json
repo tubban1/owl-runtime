@@ -67,7 +67,8 @@
     "verify:rc-fast": "node scripts/verify-release-candidate.mjs",
     "verify:rc": "npm run verify:rc-fast && npm run soak:smoke",
     "verify:execution-revision": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-revision.ts",
-    "verify:execution-activation": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-activation.ts"
+    "verify:execution-activation": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-activation.ts",
+    "verify:approval-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-approval-resume.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
