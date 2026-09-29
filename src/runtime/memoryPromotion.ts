@@ -154,7 +154,7 @@ function qualityGate(
   };
 }
 
-function detectObviousSecrets(content: string): string[] {
+export function detectObviousSecrets(content: string): string[] {
   const patterns: Array<[string, RegExp]> = [
     ["private_key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i],
     ["openai_like_key", /\bsk-[A-Za-z0-9_-]{20,}\b/],
