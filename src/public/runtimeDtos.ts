@@ -170,6 +170,8 @@ export type PublicScheduleV1 = {
   trigger: PublicScheduleTriggerV1;
   runCount: number;
   nextRunAt: string | null;
+  pausedAt: string | null;
+  pausedNextRunAt: string | null;
   lastRunAt: string | null;
   lastCompletedAt: string | null;
   lastTaskId: string | null;
