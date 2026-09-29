@@ -35,14 +35,14 @@ immutable User Skill Registry
 Feature detection:
 
 ```text
-extensions.userSkillRegistry.workflowDiscovery.version = 1
-extensions.userSkillRegistry.workflowDiscovery.status = candidate
+extensions.workflowSkillDiscovery.version = 1
+extensions.workflowSkillDiscovery.status = candidate
 ```
 
 Optional client interface:
 
 ```text
-WorkflowSkillDiscoveryRuntimeClient
+WorkflowDiscoveryRuntimeClient
 ```
 
 Method:
