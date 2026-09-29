@@ -1,6 +1,8 @@
 import type {
+  ActivateExecutionRevisionRequest,
   ApprovalState,
   CreateScheduleRequest,
+  CreateTaskFromActivationRequest,
   CreateTaskRequest,
   HealthRequest,
   PrimitiveCallRequest,
@@ -51,6 +53,8 @@ export const RUNTIME_RPC_METHODS = [
   "user-skills.rollback",
   "user-skills.uninstall",
   "tasks.create",
+  "execution-revisions.activate",
+  "execution-revisions.create-task",
   "tasks.list",
   "tasks.get",
   "tasks.run",
@@ -217,6 +221,14 @@ export async function invokeRuntimeRpc(
 
     case "tasks.create":
       return await client.createTask(object as CreateTaskRequest);
+    case "execution-revisions.activate":
+      return await client.activateExecutionRevision(
+        object as ActivateExecutionRevisionRequest,
+      );
+    case "execution-revisions.create-task":
+      return await client.createTaskFromActivation(
+        object as CreateTaskFromActivationRequest,
+      );
     case "tasks.list":
       return await client.listTasks();
     case "tasks.get":
