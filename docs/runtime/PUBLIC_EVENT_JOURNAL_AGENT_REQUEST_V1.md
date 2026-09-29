@@ -460,6 +460,7 @@ governed Runtime state migration registry.
 - permission escalation not converted into semantic work;
 - state-commit / event-append crash boundary;
 - journal-append / outbox-ack crash boundary;
+- four concurrent Runtime writer processes with one gap-free global sequence;
 - public Runtime RPC `events.list`.
 
 Task-local M2 remains unchanged.

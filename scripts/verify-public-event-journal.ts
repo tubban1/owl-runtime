@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 process.env.OWL_RUNTIME_MODE = "test";
 
@@ -147,6 +147,95 @@ async function runCrashCase(name: string, fault: string) {
     "crash phase2 failed: " + phase2.stdout + phase2.stderr,
   );
   assert.match(phase2.stdout, /RECOVERY_PASS/);
+}
+
+
+async function runConcurrentWriterCase() {
+  const concurrentScratch = path.join(scratch, "concurrent");
+  await fs.rm(concurrentScratch, { recursive: true, force: true });
+  await fs.mkdir(concurrentScratch, { recursive: true });
+
+  const worker = path.join(
+    root,
+    "scripts",
+    "verify-public-event-append-worker.ts",
+  );
+  const tsx = path.join(root, "node_modules", ".bin", "tsx");
+  const env = {
+    ...process.env,
+    PUBLIC_EVENT_CONCURRENT_SCRATCH: concurrentScratch,
+    RUNTIME_PUBLIC_EVENT_RETENTION_MAX: "10000",
+  };
+
+  async function runWriter(prefix: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(tsx, [worker, prefix, "10"], {
+        cwd: root,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+      child.once("error", reject);
+      child.once("close", (code) => {
+        if (code !== 0) {
+          reject(
+            new Error(
+              "concurrent writer " +
+                prefix +
+                " failed: " +
+                stdout +
+                stderr,
+            ),
+          );
+          return;
+        }
+        if (!stdout.includes("APPEND_PASS")) {
+          reject(
+            new Error(
+              "concurrent writer " + prefix + " produced no success receipt.",
+            ),
+          );
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  await Promise.all(["a", "b", "c", "d"].map(runWriter));
+
+  process.env.RUNTIME_PUBLIC_EVENT_DIR = path.join(
+    concurrentScratch,
+    "events",
+  );
+  process.env.RUNTIME_PUBLIC_EVENT_KEY_PATH = path.join(
+    concurrentScratch,
+    "events.key",
+  );
+  process.env.RUNTIME_PUBLIC_EVENT_RETENTION_MAX = "10000";
+
+  const listed = await listPublicRuntimeEvents({
+    afterCursor: "runtime-events:0",
+    limit: 100,
+  });
+  assert.equal(listed.events.length, 40);
+  assert.deepEqual(
+    listed.events.map((event) => event.sequence),
+    Array.from({ length: 40 }, (_, index) => index + 1),
+  );
+  assert.equal(
+    new Set(listed.events.map((event) => event.eventId)).size,
+    40,
+  );
+  assert.equal(listed.retention.oldestSequence, 1);
+  assert.equal(listed.retention.newestSequence, 40);
 }
 
 try {
@@ -460,6 +549,10 @@ try {
     "user_skill_agent_request_after_journal_append",
   );
 
+  // Multiple Runtime processes sharing the state root must not allocate the
+  // same sequence or manufacture a gap.
+  await runConcurrentWriterCase();
+
   // Canonical candidate state remains separately readable from coordination events.
   process.env.RUNTIME_PUBLIC_EVENT_DIR = path.join(scratch, "public-events");
   process.env.RUNTIME_PUBLIC_EVENT_KEY_PATH = path.join(scratch, "public-events.key");
@@ -486,6 +579,7 @@ try {
         secretFieldRejected: true,
         permissionEscalationNotProposed: true,
         stateEventCrashBoundaryRecovered: true,
+        crossProcessSequenceNoGaps: true,
         publicRpcEventsList: true,
         partialTypeFilterRejected: true,
       },
