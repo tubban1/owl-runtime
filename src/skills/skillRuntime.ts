@@ -136,6 +136,11 @@ import {
   weChatSessionAdapterContract,
 } from "../runtime/wechatSessionAdapter.js";
 
+import {
+  executeUserSkill,
+  getUserSkillCatalogEntries,
+} from "./userSkillRuntime.js";
+
 type JsonObject = Record<string, unknown>;
 
 type SkillContract = {
@@ -3410,13 +3415,15 @@ function assertSkillCompatibility(skill: SkillDefinition): SkillRuntimeMetadata 
   return metadata;
 }
 
-export function getSkillCatalog() {
-  return skills.map(
+export async function getSkillCatalog() {
+  const builtIn = skills.map(
     ({ run: _run, dryRunPlan: _dryRunPlan, keywords: _keywords, ...skill }) => ({
       ...skill,
+      source: "builtin" as const,
       ...metadataForSkill(skill as SkillDefinition),
     }),
   );
+  return [...builtIn, ...(await getUserSkillCatalogEntries())];
 }
 
 export async function executeSkill(
@@ -3426,9 +3433,7 @@ export async function executeSkill(
 ) {
   const skill = byId.get(skillId);
   if (!skill) {
-    throw new Error(
-      `Unknown skill "${skillId}". Call skill_catalog for supported skills.`,
-    );
+    return await executeUserSkill(skillId, args, dryRun);
   }
 
   const runtimeMetadata = assertSkillCompatibility(skill);
@@ -3488,11 +3493,10 @@ function skillScore(goal: string, skill: SkillDefinition): number {
 
 export async function getCapabilityManifest(goal = "") {
   const identity = getRuntimeIdentity();
-  const recommended = [...skills]
+  const builtInRecommended = [...skills]
     .map((skill) => ({ skill, score: skillScore(goal, skill) }))
     .filter((item) => !goal.trim() || item.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
     .map(({ skill, score }) => ({
       id: skill.id,
       domain: skill.domain,
@@ -3500,12 +3504,60 @@ export async function getCapabilityManifest(goal = "") {
       inputs: skill.inputs,
       runtime: metadataForSkill(skill),
       contract: skill.contract,
+      source: "builtin" as const,
       relevanceScore: score,
     }));
+
+  const userSkills = await getUserSkillCatalogEntries();
+  const normalizedGoal = goal.trim().toLowerCase();
+  const userRecommended = userSkills
+    .map((skill) => {
+      const haystack = [skill.id, skill.title, skill.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const score =
+        !normalizedGoal
+          ? 0
+          : normalizedGoal
+              .split(/\s+/)
+              .filter(Boolean)
+              .reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0);
+      return { skill, score };
+    })
+    .filter((item) => !normalizedGoal || item.score > 0)
+    .map(({ skill, score }) => ({
+      id: skill.id,
+      domain: skill.domain,
+      description: skill.description,
+      inputs: skill.inputs,
+      runtime: {
+        skillVersion: skill.skillVersion,
+        requiredPrimitiveAbi: skill.requiredPrimitiveAbi,
+        requiredPrimitives: skill.requiredPrimitives,
+        executionMode: skill.executionMode,
+        memoryPolicy: skill.memoryPolicy,
+      },
+      contract: skill.contract,
+      source: "user" as const,
+      relevanceScore: score,
+    }));
+
+  const recommended = [...builtInRecommended, ...userRecommended]
+    .sort((a, b) => b.relevanceScore - a.relevanceScore)
+    .slice(0, 8);
 
   return {
     goal: goal || null,
     identity,
+    extensions: {
+      userSkillRegistry: {
+        version: 1,
+        status: "candidate",
+        clientInterface: "UserSkillRuntimeClient",
+        namespaces: ["skill-candidates.*", "user-skills.*"],
+      },
+    },
     architecture: {
       name: identity.productName,
       wakeName: identity.wakeName,
@@ -3555,6 +3607,8 @@ export async function getCapabilityManifest(goal = "") {
       persistentLoopController:
         "v0.9.7 stateful loops + v0.9.9 durable session phases",
       semanticPromotion: "v0.9.8 explicit M2 → gate → M3 pipeline",
+      userSkillRegistry:
+        "1.x candidate: digest-bound Candidate → Persistent Test Task → M2/Verifier gates → immutable User Skill Registry",
       globalEpisodicIndex: "v0.9.9 encrypted terminal-task experience index",
       hybridRecall:
         "v0.9.9 unified episodic + semantic lexical/vector recall",

@@ -36,6 +36,7 @@ import {
   readPersistentTask,
   writePersistentTask,
   type PersistentTask,
+  type PersistentTaskProvenance,
   type PersistentTaskStep,
 } from "./taskStore.js";
 import type { Observation } from "../observation/observationAbi.js";
@@ -143,6 +144,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
     label: task.label,
     status: task.status,
     ownerSessionId: task.ownerSessionId ?? null,
+    provenance: task.provenance ?? null,
     executionTarget: normalizeExecutionTarget(task.executionTarget),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -494,6 +496,7 @@ export async function createPersistentPrimitiveTask(
     failFast?: boolean;
     taskId?: string;
     executionTarget?: ExecutionTarget;
+    provenance?: PersistentTaskProvenance;
   },
 ) {
   const plan = validatePrimitiveTaskSteps(steps);
@@ -510,6 +513,7 @@ export async function createPersistentPrimitiveTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    provenance: options?.provenance,
     executionTarget,
     createdAt: now,
     updatedAt: now,

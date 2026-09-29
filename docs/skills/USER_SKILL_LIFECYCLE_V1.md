@@ -428,3 +428,20 @@ OWL may automatically **draft and test a candidate**.
 OWL should not silently turn that candidate into a new trusted production capability with broader side effects.
 
 The promotion boundary remains explicit, auditable, versioned, and reversible.
+
+
+## 1.x Phase 1 implementation refinement
+
+The implementation evaluation tightened the original proposal in four places:
+
+1. `candidate.test` is not a second execution API. `skill-candidates.compile-test` returns a normal Persistent Task and the caller uses existing `tasks.run/get/resolve`.
+2. Candidate and Registry mutations reuse Runtime `ResourceArbiter` governance locks plus digest-bound revisions; no separate lock/CAS engine is introduced.
+3. Phase 1 declarative User Skills reject the `sys.exec` arbitrary-shell escape hatch even though it is an L1 Primitive. Arbitrary executable code belongs to the later native/code-plugin trust class.
+4. Promotion binds the exact candidate digest to a real Persistent Test Task and the existing M2 evidence digest. M3 Semantic Memory remains independent and is never auto-created by Skill promotion.
+
+Public 1.x namespaces are:
+
+- `skill-candidates.submit/list/get/revise/validate/dismiss/compile-test/inspect/promote`
+- `user-skills.list/get/enable/disable/activate-version/rollback/uninstall`
+
+Existing `skills.catalog` and `skill.run` remain the discovery/execution surface after promotion.

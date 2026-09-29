@@ -8,6 +8,23 @@ import {
   getSkillCatalog,
 } from "../skills/skillRuntime.js";
 import {
+  activateUserSkillVersion,
+  compileSkillCandidateTest,
+  dismissSkillCandidate,
+  getSkillCandidate,
+  getSkillCandidates,
+  getUserSkill,
+  inspectSkillCandidate,
+  listUserSkills,
+  promoteSkillCandidate,
+  reviseSkillCandidate,
+  rollbackUserSkill,
+  setUserSkillEnabled,
+  submitSkillCandidate,
+  uninstallUserSkill,
+  validateSkillCandidate,
+} from "../skills/userSkillRuntime.js";
+import {
   cancelPersistentTask,
   createPersistentTask,
   deletePersistentTask,
@@ -92,6 +109,43 @@ export type SkillRunRequest = {
   args?: Record<string, unknown>;
   dryRun?: boolean;
   executionTarget?: PublicExecutionTarget;
+};
+export type SkillCandidateSubmitRequest = { manifest: unknown };
+export type SkillCandidateReviseRequest = {
+  candidateId: string;
+  expectedDigest: string;
+  manifest: unknown;
+};
+export type SkillCandidateValidateRequest = {
+  candidateId: string;
+  expectedDigest?: string;
+};
+export type SkillCandidateCompileTestRequest = {
+  candidateId: string;
+  expectedDigest: string;
+  inputs?: Record<string, unknown>;
+};
+export type SkillCandidateInspectRequest = {
+  candidateId: string;
+  testTaskId?: string;
+};
+export type SkillCandidatePromoteRequest = {
+  candidateId: string;
+  expectedDigest: string;
+  testTaskId: string;
+  confirm: boolean;
+};
+export type UserSkillVersionRequest = {
+  skillId: string;
+  version: string;
+};
+export type UserSkillRollbackRequest = {
+  skillId: string;
+  version?: string;
+};
+export type UserSkillUninstallRequest = {
+  skillId: string;
+  version?: string;
 };
 
 export type TaskStepRequest = {
@@ -213,6 +267,28 @@ async function withPublicExecutionTarget<T>(
   );
 }
 
+export interface UserSkillRuntimeClient {
+  submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown>;
+  listSkillCandidates(): Promise<unknown>;
+  getSkillCandidate(candidateId: string): Promise<unknown>;
+  reviseSkillCandidate(request: SkillCandidateReviseRequest): Promise<unknown>;
+  validateSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown>;
+  dismissSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown>;
+  compileSkillCandidateTest(request: SkillCandidateCompileTestRequest): Promise<unknown>;
+  inspectSkillCandidate(request: SkillCandidateInspectRequest): Promise<unknown>;
+  promoteSkillCandidate(request: SkillCandidatePromoteRequest): Promise<unknown>;
+
+  listUserSkills(): Promise<unknown>;
+  getUserSkill(skillId: string): Promise<unknown>;
+  enableUserSkill(skillId: string): Promise<unknown>;
+  disableUserSkill(skillId: string): Promise<unknown>;
+  activateUserSkillVersion(request: UserSkillVersionRequest): Promise<unknown>;
+  rollbackUserSkill(request: UserSkillRollbackRequest): Promise<unknown>;
+  uninstallUserSkill(request: UserSkillUninstallRequest): Promise<unknown>;
+}
+
+export type RuntimeClientWithUserSkills = RuntimeClient & UserSkillRuntimeClient;
+
 export interface RuntimeClient {
   info(): Promise<RuntimeClientInfo>;
 
@@ -254,7 +330,7 @@ export interface RuntimeClient {
  * External products MUST depend on RuntimeClient semantics, not import Runtime
  * internals. IPC/HTTP implementations should preserve this interface.
  */
-export class InProcessRuntimeClient implements RuntimeClient {
+export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient {
   async info(): Promise<RuntimeClientInfo> {
     return {
       apiVersion: RUNTIME_PUBLIC_API_VERSION,
@@ -301,6 +377,69 @@ export class InProcessRuntimeClient implements RuntimeClient {
           request.dryRun ?? false,
         ),
     );
+  }
+  async submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown> {
+    return await submitSkillCandidate(request.manifest);
+  }
+
+  async listSkillCandidates(): Promise<unknown> {
+    return await getSkillCandidates();
+  }
+
+  async getSkillCandidate(candidateId: string): Promise<unknown> {
+    return await getSkillCandidate(candidateId);
+  }
+
+  async reviseSkillCandidate(request: SkillCandidateReviseRequest): Promise<unknown> {
+    return await reviseSkillCandidate(request);
+  }
+
+  async validateSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown> {
+    return await validateSkillCandidate(request);
+  }
+
+  async dismissSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown> {
+    return await dismissSkillCandidate(request);
+  }
+
+  async compileSkillCandidateTest(request: SkillCandidateCompileTestRequest): Promise<unknown> {
+    return await compileSkillCandidateTest(request);
+  }
+
+  async inspectSkillCandidate(request: SkillCandidateInspectRequest): Promise<unknown> {
+    return await inspectSkillCandidate(request);
+  }
+
+  async promoteSkillCandidate(request: SkillCandidatePromoteRequest): Promise<unknown> {
+    return await promoteSkillCandidate(request);
+  }
+
+  async listUserSkills(): Promise<unknown> {
+    return await listUserSkills();
+  }
+
+  async getUserSkill(skillId: string): Promise<unknown> {
+    return await getUserSkill(skillId);
+  }
+
+  async enableUserSkill(skillId: string): Promise<unknown> {
+    return await setUserSkillEnabled(skillId, true);
+  }
+
+  async disableUserSkill(skillId: string): Promise<unknown> {
+    return await setUserSkillEnabled(skillId, false);
+  }
+
+  async activateUserSkillVersion(request: UserSkillVersionRequest): Promise<unknown> {
+    return await activateUserSkillVersion(request);
+  }
+
+  async rollbackUserSkill(request: UserSkillRollbackRequest): Promise<unknown> {
+    return await rollbackUserSkill(request);
+  }
+
+  async uninstallUserSkill(request: UserSkillUninstallRequest): Promise<unknown> {
+    return await uninstallUserSkill(request);
   }
 
   async createTask(request: CreateTaskRequest): Promise<unknown> {

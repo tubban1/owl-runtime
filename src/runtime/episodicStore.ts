@@ -9,7 +9,10 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
-import type { PersistentTaskStatus } from "../tasks/taskStore.js";
+import type {
+  PersistentTaskProvenance,
+  PersistentTaskStatus,
+} from "../tasks/taskStore.js";
 import type { StoredEmbedding } from "./embeddingProvider.js";
 
 export type EpisodicStepSummary = {
@@ -40,6 +43,8 @@ export type GlobalEpisodeRecord = {
   eventMessages: string[];
   searchableText: string;
   contentDigest: string;
+  evidenceDigest?: string;
+  provenance?: PersistentTaskProvenance;
   retrieval: {
     embedding?: StoredEmbedding;
     vectorizer?: "feature-hash-v1";
@@ -197,6 +202,17 @@ export async function listGlobalEpisodes(): Promise<GlobalEpisodeRecord[]> {
     }
   }
   return records.sort((a, b) => b.terminalAt.localeCompare(a.terminalAt));
+}
+
+export async function readGlobalEpisode(
+  taskId: string,
+): Promise<GlobalEpisodeRecord> {
+  await ensureDir();
+  const key = await loadOrCreateKey();
+  const envelope = JSON.parse(
+    await fs.readFile(recordPath(taskId), "utf8"),
+  ) as EncryptedEnvelope;
+  return decrypt(envelope, key);
 }
 
 export async function deleteGlobalEpisode(taskId: string): Promise<void> {

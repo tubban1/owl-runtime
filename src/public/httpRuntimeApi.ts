@@ -10,6 +10,7 @@ import {
   InProcessRuntimeClient,
   RUNTIME_PUBLIC_API_VERSION,
   type RuntimeClient,
+  type UserSkillRuntimeClient,
 } from "./runtimeClient.js";
 import {
   RUNTIME_RPC_METHODS,
@@ -75,7 +76,7 @@ function unauthorized(res: any, requestId?: string) {
 
 export function registerRuntimeHttpApi(
   app: Express,
-  client: RuntimeClient = new InProcessRuntimeClient(),
+  client: RuntimeClient & Partial<UserSkillRuntimeClient> = new InProcessRuntimeClient(),
 ) {
   app.get("/runtime/v0.1/info", async (req, res) => {
     if (!apiTokenAuthorized(req)) {

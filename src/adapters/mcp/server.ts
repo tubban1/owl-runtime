@@ -2091,7 +2091,7 @@ function createServer() {
     },
     async () => {
       try {
-        return ok(getSkillCatalog());
+        return ok(await getSkillCatalog());
       } catch (error) {
         return fail(error);
       }

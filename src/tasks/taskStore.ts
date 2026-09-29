@@ -67,11 +67,26 @@ export interface PersistentTaskEvent {
   stepId?: string;
 }
 
+export type PersistentTaskProvenance =
+  | {
+      kind: "skill_candidate_test";
+      candidateId: string;
+      candidateDigest: string;
+      inputDigest: string;
+    }
+  | {
+      kind: "user_skill";
+      skillId: string;
+      skillVersion: string;
+      skillDigest: string;
+    };
+
 export interface PersistentTask {
   version: 1;
   id: string;
   label: string;
   ownerSessionId?: string;
+  provenance?: PersistentTaskProvenance;
   executionTarget?: ExecutionTarget;
   createdAt: string;
   updatedAt: string;

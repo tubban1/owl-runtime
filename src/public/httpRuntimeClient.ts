@@ -11,7 +11,17 @@ import {
   type RunTaskRequest,
   type RuntimeClient,
   type RuntimeClientInfo,
+  type UserSkillRuntimeClient,
   type SkillRunRequest,
+  type SkillCandidateSubmitRequest,
+  type SkillCandidateReviseRequest,
+  type SkillCandidateValidateRequest,
+  type SkillCandidateCompileTestRequest,
+  type SkillCandidateInspectRequest,
+  type SkillCandidatePromoteRequest,
+  type UserSkillVersionRequest,
+  type UserSkillRollbackRequest,
+  type UserSkillUninstallRequest,
 } from "./runtimeClient.js";
 import type { RuntimeRpcMethod } from "./runtimeRpc.js";
 
@@ -57,7 +67,7 @@ export type RuntimeInvokeOptions = {
   signal?: AbortSignal;
 };
 
-export class HttpRuntimeClient implements RuntimeClient {
+export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient {
   private readonly baseUrl: string;
   private readonly sessionId: string;
   private readonly token?: string;
@@ -192,6 +202,69 @@ export class HttpRuntimeClient implements RuntimeClient {
 
   async runSkill(request: SkillRunRequest): Promise<unknown> {
     return await this.rpc("skill.run", request);
+  }
+  async submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.submit", request);
+  }
+
+  async listSkillCandidates(): Promise<unknown> {
+    return await this.rpc("skill-candidates.list");
+  }
+
+  async getSkillCandidate(candidateId: string): Promise<unknown> {
+    return await this.rpc("skill-candidates.get", { candidateId });
+  }
+
+  async reviseSkillCandidate(request: SkillCandidateReviseRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.revise", request);
+  }
+
+  async validateSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.validate", request);
+  }
+
+  async dismissSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.dismiss", request);
+  }
+
+  async compileSkillCandidateTest(request: SkillCandidateCompileTestRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.compile-test", request);
+  }
+
+  async inspectSkillCandidate(request: SkillCandidateInspectRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.inspect", request);
+  }
+
+  async promoteSkillCandidate(request: SkillCandidatePromoteRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.promote", request);
+  }
+
+  async listUserSkills(): Promise<unknown> {
+    return await this.rpc("user-skills.list");
+  }
+
+  async getUserSkill(skillId: string): Promise<unknown> {
+    return await this.rpc("user-skills.get", { skillId });
+  }
+
+  async enableUserSkill(skillId: string): Promise<unknown> {
+    return await this.rpc("user-skills.enable", { skillId });
+  }
+
+  async disableUserSkill(skillId: string): Promise<unknown> {
+    return await this.rpc("user-skills.disable", { skillId });
+  }
+
+  async activateUserSkillVersion(request: UserSkillVersionRequest): Promise<unknown> {
+    return await this.rpc("user-skills.activate-version", request);
+  }
+
+  async rollbackUserSkill(request: UserSkillRollbackRequest): Promise<unknown> {
+    return await this.rpc("user-skills.rollback", request);
+  }
+
+  async uninstallUserSkill(request: UserSkillUninstallRequest): Promise<unknown> {
+    return await this.rpc("user-skills.uninstall", request);
   }
 
   async createTask(request: CreateTaskRequest): Promise<unknown> {

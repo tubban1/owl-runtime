@@ -8,7 +8,17 @@ import type {
   ResolveTaskStepRequest,
   RunTaskRequest,
   RuntimeClient,
+  UserSkillRuntimeClient,
   SkillRunRequest,
+  SkillCandidateSubmitRequest,
+  SkillCandidateReviseRequest,
+  SkillCandidateValidateRequest,
+  SkillCandidateCompileTestRequest,
+  SkillCandidateInspectRequest,
+  SkillCandidatePromoteRequest,
+  UserSkillVersionRequest,
+  UserSkillRollbackRequest,
+  UserSkillUninstallRequest,
 } from "./runtimeClient.js";
 
 export const RUNTIME_RPC_METHODS = [
@@ -19,6 +29,22 @@ export const RUNTIME_RPC_METHODS = [
   "primitive.call",
   "skills.catalog",
   "skill.run",
+  "skill-candidates.submit",
+  "skill-candidates.list",
+  "skill-candidates.get",
+  "skill-candidates.revise",
+  "skill-candidates.validate",
+  "skill-candidates.dismiss",
+  "skill-candidates.compile-test",
+  "skill-candidates.inspect",
+  "skill-candidates.promote",
+  "user-skills.list",
+  "user-skills.get",
+  "user-skills.enable",
+  "user-skills.disable",
+  "user-skills.activate-version",
+  "user-skills.rollback",
+  "user-skills.uninstall",
   "tasks.create",
   "tasks.list",
   "tasks.get",
@@ -65,8 +91,40 @@ function optionalBoolean(object: JsonObject, key: string): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
+function requireUserSkillRuntimeClient(
+  client: RuntimeClient & Partial<UserSkillRuntimeClient>,
+): UserSkillRuntimeClient {
+  const required: Array<keyof UserSkillRuntimeClient> = [
+    "submitSkillCandidate",
+    "listSkillCandidates",
+    "getSkillCandidate",
+    "reviseSkillCandidate",
+    "validateSkillCandidate",
+    "dismissSkillCandidate",
+    "compileSkillCandidateTest",
+    "inspectSkillCandidate",
+    "promoteSkillCandidate",
+    "listUserSkills",
+    "getUserSkill",
+    "enableUserSkill",
+    "disableUserSkill",
+    "activateUserSkillVersion",
+    "rollbackUserSkill",
+    "uninstallUserSkill",
+  ];
+  const missing = required.filter(
+    (method) => typeof client[method] !== "function",
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      "RUNTIME_CAPABILITY_UNAVAILABLE: user-skill-registry extension is not implemented by this RuntimeClient.",
+    );
+  }
+  return client as RuntimeClient & UserSkillRuntimeClient;
+}
+
 export async function invokeRuntimeRpc(
-  client: RuntimeClient,
+  client: RuntimeClient & Partial<UserSkillRuntimeClient>,
   method: RuntimeRpcMethod,
   params?: unknown,
 ): Promise<unknown> {
@@ -89,6 +147,38 @@ export async function invokeRuntimeRpc(
       return await client.getSkillCatalog();
     case "skill.run":
       return await client.runSkill(object as SkillRunRequest);
+    case "skill-candidates.submit":
+      return await requireUserSkillRuntimeClient(client).submitSkillCandidate(object as SkillCandidateSubmitRequest);
+    case "skill-candidates.list":
+      return await requireUserSkillRuntimeClient(client).listSkillCandidates();
+    case "skill-candidates.get":
+      return await requireUserSkillRuntimeClient(client).getSkillCandidate(requiredString(object, "candidateId"));
+    case "skill-candidates.revise":
+      return await requireUserSkillRuntimeClient(client).reviseSkillCandidate(object as SkillCandidateReviseRequest);
+    case "skill-candidates.validate":
+      return await requireUserSkillRuntimeClient(client).validateSkillCandidate(object as SkillCandidateValidateRequest);
+    case "skill-candidates.dismiss":
+      return await requireUserSkillRuntimeClient(client).dismissSkillCandidate(object as SkillCandidateValidateRequest);
+    case "skill-candidates.compile-test":
+      return await requireUserSkillRuntimeClient(client).compileSkillCandidateTest(object as SkillCandidateCompileTestRequest);
+    case "skill-candidates.inspect":
+      return await requireUserSkillRuntimeClient(client).inspectSkillCandidate(object as SkillCandidateInspectRequest);
+    case "skill-candidates.promote":
+      return await requireUserSkillRuntimeClient(client).promoteSkillCandidate(object as SkillCandidatePromoteRequest);
+    case "user-skills.list":
+      return await requireUserSkillRuntimeClient(client).listUserSkills();
+    case "user-skills.get":
+      return await requireUserSkillRuntimeClient(client).getUserSkill(requiredString(object, "skillId"));
+    case "user-skills.enable":
+      return await requireUserSkillRuntimeClient(client).enableUserSkill(requiredString(object, "skillId"));
+    case "user-skills.disable":
+      return await requireUserSkillRuntimeClient(client).disableUserSkill(requiredString(object, "skillId"));
+    case "user-skills.activate-version":
+      return await requireUserSkillRuntimeClient(client).activateUserSkillVersion(object as UserSkillVersionRequest);
+    case "user-skills.rollback":
+      return await requireUserSkillRuntimeClient(client).rollbackUserSkill(object as UserSkillRollbackRequest);
+    case "user-skills.uninstall":
+      return await requireUserSkillRuntimeClient(client).uninstallUserSkill(object as UserSkillUninstallRequest);
 
     case "tasks.create":
       return await client.createTask(object as CreateTaskRequest);
