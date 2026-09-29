@@ -27,6 +27,7 @@ export type RuntimeRequestReplayError = {
 
 type RuntimeRequestReplayRecord = {
   version: typeof RUNTIME_REQUEST_REPLAY_VERSION;
+  storageId: string;
   sessionDigest: string;
   idempotencyKey: string;
   method: string;
@@ -81,6 +82,7 @@ const replayErrorSchema = z.object({
 
 const replayRecordSchema = z.object({
   version: z.literal(RUNTIME_REQUEST_REPLAY_VERSION),
+  storageId: z.string().regex(DIGEST_PATTERN),
   sessionDigest: z.string().regex(DIGEST_PATTERN),
   idempotencyKey: z.string().regex(KEY_PATTERN),
   method: z.string().min(1).max(160),
@@ -312,7 +314,13 @@ async function readRecord(
       "utf8",
     );
     const envelope = JSON.parse(encoded) as EncryptedEnvelope;
-    return decrypt(envelope, await loadExistingKey());
+    const record = decrypt(envelope, await loadExistingKey());
+    if (record.storageId !== recordId(sessionId, idempotencyKey)) {
+      throw new Error(
+        "IDEMPOTENCY_STORE_CORRUPT: replay record storage identity mismatch.",
+      );
+    }
+    return record;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     if (
@@ -333,7 +341,7 @@ async function writeRecord(record: RuntimeRequestReplayRecord): Promise<void> {
   const key = await loadOrCreateKey();
   const target = path.join(
     replayDir(),
-    recordIdFromRecord(parsed) + ".state",
+    parsed.storageId + ".state",
   );
   const temp =
     target + "." + process.pid + "." + randomUUID() + ".tmp";
@@ -352,14 +360,6 @@ async function writeRecord(record: RuntimeRequestReplayRecord): Promise<void> {
   } finally {
     await fs.rm(temp, { force: true }).catch(() => undefined);
   }
-}
-
-function recordIdFromRecord(record: RuntimeRequestReplayRecord): string {
-  return createHash("sha256")
-    .update(record.sessionDigest)
-    .update("\0")
-    .update(record.idempotencyKey)
-    .digest("hex");
 }
 
 function processAlive(pid: number): boolean {
@@ -594,6 +594,7 @@ async function reserve(
       const now = new Date().toISOString();
       await writeRecord({
         version: RUNTIME_REQUEST_REPLAY_VERSION,
+        storageId: recordId(input.sessionId, input.idempotencyKey),
         sessionDigest: sessionDigest(input.sessionId),
         idempotencyKey: input.idempotencyKey,
         method: input.method,
