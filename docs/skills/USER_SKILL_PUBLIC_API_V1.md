@@ -40,7 +40,7 @@ This avoids turning an additive 1.x feature into a source-breaking requirement f
 Repeated-work discovery is a separate additive client extension:
 
 ```text
-WorkflowSkillDiscoveryRuntimeClient
+WorkflowDiscoveryRuntimeClient
 ```
 
 Public method:
@@ -58,7 +58,7 @@ skill-candidates.discover-workflows
 Feature detection:
 
 ```text
-extensions.userSkillRegistry.workflowDiscovery.version = 1
+extensions.workflowSkillDiscovery.version = 1
 ```
 
 Discovery is read-only: it returns draft manifests and validation previews but does not write the Candidate Store or promote a Skill.
