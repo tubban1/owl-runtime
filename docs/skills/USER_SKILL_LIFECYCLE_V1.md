@@ -443,6 +443,8 @@ Candidate-test and installed-User-Skill Tasks are excluded so Skills do not recu
 
 Discovery does not call `skill-candidates.submit`. Desktop/Worker/ChatGPT must explicitly submit the proposed manifest before the existing Candidate lifecycle begins.
 
+The detector keeps a stable workflow-level proposal identity and annotates existing Candidate/Registry state. Later successful runs therefore surface as evidence refresh on the same proposal instead of unrelated Skill opportunities. Evidence refresh never revises a Candidate automatically.
+
 A new manifest secret gate also prevents constant credentials/tokens from being distilled into immutable Skill content.
 
 Historical M2 evidence digests are treated as creation-time evidence identities. Runtime may append later bookkeeping events to the source Task, so discovery re-validates current Task success but does not require a later recomputed Task digest to equal the stored M2 digest.
