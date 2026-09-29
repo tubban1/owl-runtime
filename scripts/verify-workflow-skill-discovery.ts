@@ -42,11 +42,15 @@ const { invokeRuntimeRpc } = await import(
   "../src/public/runtimeRpc.js"
 );
 
-async function createRepeatedRun(index: number, derived = false) {
+async function createRepeatedRun(
+  index: number,
+  derived = false,
+  label = "Repository repeated health workflow",
+) {
   const statusId = `status_${index}`;
   const logId = `log_${index}`;
   const created = await createPersistentPrimitiveTask(
-    "Repository repeated health workflow",
+    label,
     [
       {
         id: statusId,
@@ -142,7 +146,11 @@ try {
   const candidatesBefore = (await getSkillCandidates()) as any[];
   assert.equal(candidatesBefore.length, 0);
 
-  await createRepeatedRun(4, true);
+  await createRepeatedRun(4, false, "Different intent with same Primitive graph");
+  const keepsIntentBoundary = (await discoverWorkflowSkillCandidates()) as any;
+  assert.equal(keepsIntentBoundary.proposals[0].support.successfulRuns, 3);
+
+  await createRepeatedRun(5, true);
   const excludesDerived = (await discoverWorkflowSkillCandidates()) as any;
   assert.equal(excludesDerived.proposals[0].support.successfulRuns, 3);
 
@@ -218,6 +226,7 @@ try {
         normalizedStepIds: true,
         scalarParameterization: true,
         collisionSafeParameterNames: true,
+        labelBoundClustering: true,
         historicalM2EvidenceBound: true,
         excludesDerivedSkillRuns: true,
         publicRuntimeApi: true,
