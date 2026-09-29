@@ -1,9 +1,6 @@
 name: 1.x User Skill Gate
 
 on:
-  push:
-    branches:
-      - feature/1.x-user-skill-registry
   pull_request:
     branches:
       - platform/contracts-v1
