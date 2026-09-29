@@ -23,6 +23,35 @@ export type PublicExecutionRevisionRefV1 = {
   digest: string;
 };
 
+export type PublicExecutionActivationV1 = {
+  version: 1;
+  id: string;
+  revisionDigest: string;
+  testTaskId: string;
+  evidenceDigest: string;
+  activatedAt: string;
+};
+
+export type PublicTaskProvenanceV1 =
+  | {
+      kind: "skill_candidate_test";
+      candidateId: string;
+      candidateDigest: string;
+      inputDigest: string;
+    }
+  | {
+      kind: "user_skill";
+      skillId: string;
+      skillVersion: string;
+      skillDigest: string;
+    }
+  | {
+      kind: "activated_revision";
+      activationId: string;
+      testTaskId: string;
+      revisionDigest: string;
+    };
+
 export type PublicObservationV1 = {
   schemaVersion: 1;
   id: string;
@@ -63,9 +92,9 @@ export type PublicTaskDetailV1 = {
   label: string;
   status: PublicTaskStatusV1;
   ownerSessionId: string | null;
-  provenance: Record<string, unknown> | null;
+  provenance: PublicTaskProvenanceV1 | null;
   executionRevision: PublicExecutionRevisionRefV1 | null;
-  executionActivation: Record<string, unknown> | null;
+  executionActivation: PublicExecutionActivationV1 | null;
   createdAt: string;
   updatedAt: string;
   runCount: number;
