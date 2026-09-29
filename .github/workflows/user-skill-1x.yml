@@ -1,0 +1,46 @@
+name: 1.x User Skill Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-user-skill-registry
+  pull_request:
+    branches:
+      - platform/contracts-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: user-skill-1x-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  user-skill-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify User Skill Registry
+        run: npm run verify:user-skills
+
+      - name: Verify Workflow Discovery
+        run: npm run verify:workflow-discovery
+
+      - name: Build Public Types
+        run: npm run build:types
