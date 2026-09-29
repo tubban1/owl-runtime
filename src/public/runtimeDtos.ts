@@ -157,12 +157,17 @@ export type PublicApprovalV1 = {
   reason: string;
 };
 
+export type PublicScheduleTriggerV1 =
+  | { kind: "once"; at: string }
+  | { kind: "interval"; everyMs: number; startAt?: string }
+  | { kind: "daily"; time: string };
+
 export type PublicScheduleV1 = {
   schemaVersion: 1;
   id: string;
   label: string;
   enabled: boolean;
-  trigger: Record<string, unknown>;
+  trigger: PublicScheduleTriggerV1;
   runCount: number;
   nextRunAt: string | null;
   lastRunAt: string | null;
