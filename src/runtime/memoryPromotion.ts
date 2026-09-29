@@ -164,7 +164,7 @@ export function detectObviousSecrets(content: string): string[] {
     ["bearer_token", /\bBearer\s+[A-Za-z0-9._~+\/-]{20,}/i],
     [
       "credential_assignment",
-      /\b(?:password|passwd|api[_-]?key|secret|access[_-]?token)\s*[:=]\s*[^\s,;]{8,}/i,
+      /\b(?:password|passwd|api[_-]?key|secret|access[_-]?token)[\"']?\s*[:=]\s*[\"']?[^\"'\s,;}]{8,}/i,
     ],
   ];
 
