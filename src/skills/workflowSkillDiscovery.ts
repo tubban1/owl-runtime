@@ -17,6 +17,7 @@ import {
 } from "../tasks/taskStore.js";
 import {
   USER_SKILL_ABI_VERSION,
+  type SkillCandidateRecord,
   type UserSkillInputSpec,
   type UserSkillManifest,
 } from "./userSkillTypes.js";
@@ -24,6 +25,10 @@ import {
   userSkillDigest,
   validateUserSkillManifest,
 } from "./userSkillRuntime.js";
+import {
+  listSkillCandidates,
+  readUserSkillRegistry,
+} from "./userSkillStore.js";
 
 export type WorkflowSkillDiscoveryRequest = {
   minSuccessfulRuns?: number;
@@ -299,6 +304,18 @@ function slugify(label: string): string {
   return slug || "workflow";
 }
 
+function candidateSkillId(record: SkillCandidateRecord): string | null {
+  const revision = record.revisions.find(
+    (item) => item.digest === record.currentDigest,
+  );
+  const manifest = revision?.manifest;
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return null;
+  }
+  const id = (manifest as Record<string, unknown>).id;
+  return typeof id === "string" && id.trim() ? id : null;
+}
+
 function verificationForStep(
   tasks: PersistentTask[],
   index: number,
@@ -471,6 +488,9 @@ export async function discoverWorkflowSkillCandidates(
         a[0].localeCompare(b[0]),
     );
 
+  const candidateRecords =
+    repeatedGroups.length > 0 ? await listSkillCandidates() : [];
+
   for (const [structuralDigest, runs] of repeatedGroups) {
     const evidenceRuns = runs.slice(0, 100);
     const built = buildDraft(evidenceRuns, structuralDigest);
@@ -514,6 +534,24 @@ export async function discoverWorkflowSkillCandidates(
       built.manifest,
     ).report;
 
+    const matchingCandidates = candidateRecords
+      .filter((record) => candidateSkillId(record) === built.manifest!.id)
+      .map((record) => ({
+        candidateId: record.id,
+        status: record.status,
+        currentDigest: record.currentDigest,
+        exactDigest: record.currentDigest === candidateDigest,
+      }));
+    const registry = await readUserSkillRegistry(built.manifest.id);
+    const exactDigestCandidateIds = matchingCandidates
+      .filter((record) => record.exactDigest)
+      .map((record) => record.candidateId);
+    const governanceState = registry
+      ? "installed"
+      : matchingCandidates.length > 0
+        ? "candidate_exists"
+        : "new";
+
     proposals.push({
       version: 1,
       proposalId: `workflow_${structuralDigest.slice(0, 24)}`,
@@ -527,7 +565,22 @@ export async function discoverWorkflowSkillCandidates(
       manifestDigest: candidateDigest,
       manifest: built.manifest,
       validation,
-      readyForSubmit: validation.valid,
+      governance: {
+        state: governanceState,
+        evidenceRefreshAvailable:
+          governanceState === "candidate_exists" &&
+          exactDigestCandidateIds.length === 0,
+        exactDigestCandidateIds,
+        candidates: matchingCandidates,
+        installed: registry
+          ? {
+              enabled: registry.enabled,
+              activeVersion: registry.activeVersion,
+              versions: Object.keys(registry.versions).sort(),
+            }
+          : null,
+      },
+      readyForSubmit: validation.valid && governanceState === "new",
       requiresExplicitSubmit: true,
       requiresTestBeforePromotion: true,
       autoPromoted: false,
