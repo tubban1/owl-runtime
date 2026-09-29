@@ -12,6 +12,8 @@ import {
   type RuntimeClient,
   type RuntimeClientInfo,
   type UserSkillRuntimeClient,
+  type WorkflowSkillDiscoveryRuntimeClient,
+  type WorkflowSkillDiscoveryRequest,
   type SkillRunRequest,
   type SkillCandidateSubmitRequest,
   type SkillCandidateReviseRequest,
@@ -67,7 +69,7 @@ export type RuntimeInvokeOptions = {
   signal?: AbortSignal;
 };
 
-export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient {
+export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowSkillDiscoveryRuntimeClient {
   private readonly baseUrl: string;
   private readonly sessionId: string;
   private readonly token?: string;
@@ -203,6 +205,12 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient 
   async runSkill(request: SkillRunRequest): Promise<unknown> {
     return await this.rpc("skill.run", request);
   }
+  async discoverWorkflowSkillCandidates(
+    request: WorkflowSkillDiscoveryRequest = {},
+  ): Promise<unknown> {
+    return await this.rpc("skill-candidates.discover-workflows", request);
+  }
+
   async submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown> {
     return await this.rpc("skill-candidates.submit", request);
   }
