@@ -551,7 +551,7 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
 
   async createTaskFromActivation(
     request: CreateTaskFromActivationRequest,
-  ): Promise<unknown> {
+  ): Promise<PublicTaskDetailV1> {
     return await createPersistentTaskFromActivation(request);
   }
 
