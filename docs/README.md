@@ -68,6 +68,10 @@ Contracts intended to remain stable across implementations.
 - [Fault recovery matrix](operations/fault-recovery.md)
 - [Troubleshooting](operations/troubleshooting.md)
 
+## Observability
+
+- [Cloud telemetry producer contract](observability/CLOUD_TELEMETRY_V1.md)
+
 ## Security
 
 - [Permissions](security/permissions.md)
