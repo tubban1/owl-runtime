@@ -6,6 +6,7 @@ on:
       - feature/1.x-integration-closure
       - feature/1.x-execution-revision
       - feature/1.x-tested-activation
+      - feature/1.x-approval-resume
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -61,6 +62,9 @@ jobs:
 
       - name: Verify Tested Activation
         run: npm run verify:execution-activation
+
+      - name: Verify Approval Resume
+        run: npm run verify:approval-resume
 
       - name: Build Public Types
         run: npm run build:types
