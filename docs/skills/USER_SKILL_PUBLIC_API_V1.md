@@ -63,7 +63,7 @@ extensions.workflowSkillDiscovery.version = 1
 
 Discovery is read-only: it returns draft manifests and validation previews but does not write the Candidate Store or promote a Skill.
 
-Each proposal also includes read-only governance annotations for matching Candidates/Registry versions. Clients can distinguish `new`, `candidate_exists`, and `installed`; a changed draft digest on the same proposal is reported as an evidence refresh rather than triggering automatic Candidate revision.
+Each proposal also includes read-only governance annotations for matching Candidates/Registry versions. Clients can distinguish `new`, `dismissed`, `candidate_exists`, and `installed`; a changed draft digest on the same proposal is reported as an evidence refresh rather than triggering automatic Candidate revision. A dismissed exact digest remains suppressed, but a later refreshed digest can become `new` again.
 
 An `installed` proposal includes only Registry summary metadata needed for UX (enabled state, active version, installed version list); discovery does not expose a new execution path or mutate Registry state.
 
