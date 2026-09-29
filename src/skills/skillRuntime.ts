@@ -3623,6 +3623,15 @@ export async function getCapabilityManifest(goal = "") {
         atomicAuthority: "encrypted-test-task-record",
         purpose: "bind-test-evidence-to-exact-production-revision",
       },
+      approvalResume: {
+        version: 1,
+        status: "candidate",
+        model: "same-task-same-step-resume",
+        approvalOwner: "task+step+exact-args-fingerprint",
+        approve: "approvals.approve",
+        deny: "approvals.deny",
+        reconstructRequest: false,
+      },
     },
     architecture: {
       name: identity.productName,
