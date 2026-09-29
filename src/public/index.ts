@@ -70,6 +70,7 @@ export {
   type PublicTaskSummaryV1,
   type PublicRunReceiptV1,
   type PublicApprovalV1,
+  type PublicApprovalActionResultV1,
   type PublicScheduleV1,
   type PublicDeleteReceiptV1,
 } from "./runtimeDtos.js";
