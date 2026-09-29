@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { StagedArtifact } from "./taskStaging.js";
 import type { ExecutionTarget } from "../runtime/executionTarget.js";
-import type { ExecutionRevision } from "./executionRevision.js";
+import type { ExecutionActivation, ExecutionRevision } from "./executionRevision.js";
 import type { Observation } from "../observation/observationAbi.js";
 import type {
   VerificationReceipt,
@@ -80,6 +80,12 @@ export type PersistentTaskProvenance =
       skillId: string;
       skillVersion: string;
       skillDigest: string;
+    }
+  | {
+      kind: "activated_revision";
+      activationId: string;
+      testTaskId: string;
+      revisionDigest: string;
     };
 
 export interface PersistentTask {
@@ -89,6 +95,7 @@ export interface PersistentTask {
   ownerSessionId?: string;
   provenance?: PersistentTaskProvenance;
   executionRevision?: ExecutionRevision;
+  executionActivation?: ExecutionActivation;
   executionTarget?: ExecutionTarget;
   createdAt: string;
   updatedAt: string;
