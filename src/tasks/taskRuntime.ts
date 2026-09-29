@@ -42,8 +42,10 @@ import {
 import type { Observation } from "../observation/observationAbi.js";
 import {
   assertExecutionRevisionDigest,
+  createExecutionActivation,
   createExecutionRevision,
 } from "./executionRevision.js";
+import { buildTaskEvidenceReceipt } from "../runtime/taskEvidence.js";
 import {
   uncertainVerificationReceipt,
   verifyObservation,
@@ -155,6 +157,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
           digest: task.executionRevision.digest,
         }
       : null,
+    executionActivation: task.executionActivation ?? null,
     executionTarget: normalizeExecutionTarget(task.executionTarget),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -379,6 +382,8 @@ export async function createPersistentTask(
     maxConcurrency?: number;
     failFast?: boolean;
     executionTarget?: ExecutionTarget;
+    expectedRevisionDigest?: string;
+    provenance?: PersistentTaskProvenance;
   },
 ) {
   const plan = planActionGraph(steps);
@@ -394,13 +399,22 @@ export async function createPersistentTask(
   const executionTarget = assertExecutionTargetAvailable(
     options?.executionTarget ?? currentExecutionContext().executionTarget,
   );
+  const normalizedMaxConcurrency = Math.min(
+    Math.max(options?.maxConcurrency ?? 4, 1),
+    8,
+  );
+  const normalizedFailFast = options?.failFast ?? true;
   const executionRevision = createExecutionRevision({
     label,
     steps,
-    maxConcurrency: options?.maxConcurrency,
-    failFast: options?.failFast,
+    maxConcurrency: normalizedMaxConcurrency,
+    failFast: normalizedFailFast,
     executionTarget,
   });
+  assertExecutionRevisionDigest(
+    executionRevision.digest,
+    options?.expectedRevisionDigest,
+  );
   const now = new Date().toISOString();
   const id = newTaskId();
   const stage = await ensureTaskStage(id);
@@ -410,16 +424,14 @@ export async function createPersistentTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    provenance: options?.provenance,
     executionRevision,
     executionTarget,
     createdAt: now,
     updatedAt: now,
     status: "pending",
-    defaultMaxConcurrency: Math.min(
-      Math.max(options?.maxConcurrency ?? 4, 1),
-      8,
-    ),
-    defaultFailFast: options?.failFast ?? true,
+    defaultMaxConcurrency: normalizedMaxConcurrency,
+    defaultFailFast: normalizedFailFast,
     runCount: 0,
     pauseRequested: false,
     cancelRequested: false,
@@ -521,6 +533,28 @@ export async function createPersistentPrimitiveTask(
   const executionTarget = assertExecutionTargetAvailable(
     options?.executionTarget ?? currentExecutionContext().executionTarget,
   );
+  const normalizedMaxConcurrency = Math.min(
+    Math.max(options?.maxConcurrency ?? 4, 1),
+    8,
+  );
+  const normalizedFailFast = options?.failFast ?? true;
+  const revisionSteps = steps.map((step) => {
+    const routed = routePrimitive(step.primitive, step.op, step.args ?? {});
+    return {
+      id: step.id,
+      action: routed.routedAction,
+      args: step.args ?? {},
+      dependsOn: step.dependsOn,
+      verify: step.verify,
+    };
+  });
+  const executionRevision = createExecutionRevision({
+    label,
+    steps: revisionSteps,
+    maxConcurrency: normalizedMaxConcurrency,
+    failFast: normalizedFailFast,
+    executionTarget,
+  });
 
   const now = new Date().toISOString();
   const id = options?.taskId ?? newTaskId();
@@ -532,15 +566,13 @@ export async function createPersistentPrimitiveTask(
     label,
     ownerSessionId: currentExecutionContext().sessionId,
     provenance: options?.provenance,
+    executionRevision,
     executionTarget,
     createdAt: now,
     updatedAt: now,
     status: "pending",
-    defaultMaxConcurrency: Math.min(
-      Math.max(options?.maxConcurrency ?? 4, 1),
-      8,
-    ),
-    defaultFailFast: options?.failFast ?? true,
+    defaultMaxConcurrency: normalizedMaxConcurrency,
+    defaultFailFast: normalizedFailFast,
     runCount: 0,
     pauseRequested: false,
     cancelRequested: false,
@@ -626,6 +658,11 @@ export async function deletePersistentTask(id: string) {
   }
 
   const task = await loadTask(id);
+  if (task.executionActivation) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_DELETE_BLOCKED: activated test evidence is durable execution authority and cannot be deleted.",
+    );
+  }
   if (task.status === "running") {
     throw new Error("Cannot delete a task that is still marked running.");
   }
@@ -641,6 +678,127 @@ export async function deletePersistentTask(id: string) {
     stagingRoot: task.stagingRoot ?? null,
     stagedArtifactCount: task.stagedArtifacts?.length ?? 0,
   };
+}
+
+export async function activatePersistentExecutionRevision(input: {
+  testTaskId: string;
+  expectedRevisionDigest: string;
+  confirm: boolean;
+}) {
+  if (!input.confirm) {
+    throw new Error("EXECUTION_ACTIVATION_CONFIRM_REQUIRED");
+  }
+  const task = await loadTask(input.testTaskId);
+  assertExecutionRevisionDigest(
+    task.executionRevision?.digest,
+    input.expectedRevisionDigest,
+  );
+  if (!task.executionRevision) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_REVISION_MISSING: test task predates Execution Revision v1 and must be re-tested.",
+    );
+  }
+  if (task.executionActivation) {
+    if (
+      task.executionActivation.revisionDigest !== input.expectedRevisionDigest
+    ) {
+      throw new Error(
+        "STALE_TEST_EVIDENCE: existing activation belongs to a different execution revision.",
+      );
+    }
+    return {
+      idempotent: true,
+      activation: task.executionActivation,
+      executionRevision: {
+        version: task.executionRevision.version,
+        digest: task.executionRevision.digest,
+      },
+    };
+  }
+  if (task.status !== "completed") {
+    throw new Error(
+      "EXECUTION_ACTIVATION_TEST_NOT_COMPLETED: test task must complete before activation.",
+    );
+  }
+
+  const evidence = buildTaskEvidenceReceipt(
+    task,
+    task.steps.map((step) => step.id),
+  );
+  if (
+    !evidence.allStepsSucceeded ||
+    !evidence.verification.allRequiredVerified ||
+    evidence.sideEffects.unresolvedStepIds.length > 0
+  ) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_EVIDENCE_UNRESOLVED: tested revision lacks complete verified evidence.",
+    );
+  }
+
+  const activation = createExecutionActivation({
+    revisionDigest: task.executionRevision.digest,
+    testTaskId: task.id,
+    evidenceDigest: evidence.evidenceDigest,
+  });
+  task.executionActivation = activation;
+  appendTaskEvent(task, {
+    type: "execution_revision_activated",
+    message:
+      "Activated tested execution revision " +
+      task.executionRevision.digest +
+      " with evidence " +
+      evidence.evidenceDigest +
+      ".",
+  });
+  await writePersistentTask(task);
+  return {
+    idempotent: false,
+    activation,
+    executionRevision: {
+      version: task.executionRevision.version,
+      digest: task.executionRevision.digest,
+    },
+    evidence,
+  };
+}
+
+export async function createPersistentTaskFromActivation(input: {
+  testTaskId: string;
+  expectedRevisionDigest: string;
+}) {
+  const testTask = await loadTask(input.testTaskId);
+  const activation = testTask.executionActivation;
+  if (!activation || !testTask.executionRevision) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_NOT_FOUND: test task has no active tested revision.",
+    );
+  }
+  if (
+    activation.revisionDigest !== input.expectedRevisionDigest ||
+    testTask.executionRevision.digest !== input.expectedRevisionDigest
+  ) {
+    throw new Error(
+      "STALE_TEST_EVIDENCE: activation does not match the requested execution revision.",
+    );
+  }
+
+  const revision = testTask.executionRevision;
+  return await createPersistentTask(
+    revision.canonical.label,
+    revision.canonical.steps,
+    {
+      maxConcurrency: revision.canonical.maxConcurrency,
+      failFast: revision.canonical.failFast,
+      executionTarget: revision.canonical.executionTarget,
+      expectedRevisionDigest: revision.digest,
+      provenance: {
+        kind: "activated_revision",
+        activationId: activation.id,
+        testTaskId: testTask.id,
+        revisionDigest: revision.digest,
+      },
+    },
+  );
 }
 
 export async function getPersistentTaskStatus(
