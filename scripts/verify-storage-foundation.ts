@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { InProcessRuntimeClient } from "../src/public/runtimeClient.js";
 import {
   artifactObjectPath,
   commitArtifactFromFile,
@@ -15,6 +16,12 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), "owl-storage-foundation-"))
 process.env.OWL_LAB_DATA_ROOT = root;
 
 try {
+  const client = new InProcessRuntimeClient();
+  const capabilities = await client.getCapabilities("storage foundation");
+  assert.equal(capabilities.extensions.storageFoundation.version, 1);
+  assert.equal(capabilities.extensions.storageFoundation.physicalPathsPublic, false);
+  assert.equal(capabilities.extensions.storageFoundation.deletionAuthority, "runtime");
+
   const layout = await ensureStorageLayout();
   assert.equal(layout.root, path.resolve(root));
 
@@ -80,6 +87,7 @@ try {
       {
         ok: true,
         storageFoundationVersion: 1,
+        capabilityPublished: true,
         logicalArtifactIdentityDistinctFromObjectIdentity: true,
         sha256ContentAddressing: true,
         duplicateBytesDeduplicated: true,
