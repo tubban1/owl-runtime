@@ -57,3 +57,19 @@ export {
   invokeRuntimeRpc,
   type RuntimeRpcMethod,
 } from "./runtimeRpc.js";
+
+export {
+  PUBLIC_RUNTIME_DTO_VERSION,
+  type PublicTaskStatusV1,
+  type PublicTaskStepStateV1,
+  type PublicExecutionRevisionRefV1,
+  type PublicObservationV1,
+  type PublicVerificationReceiptV1,
+  type PublicTaskStepV1,
+  type PublicTaskDetailV1,
+  type PublicTaskSummaryV1,
+  type PublicRunReceiptV1,
+  type PublicApprovalV1,
+  type PublicScheduleV1,
+  type PublicDeleteReceiptV1,
+} from "./runtimeDtos.js";
