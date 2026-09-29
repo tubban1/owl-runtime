@@ -134,7 +134,7 @@ The structural `proposalId` remains stable for the same normalized intent/Primit
 Discovery also performs read-only Candidate/Registry lookup and annotates each proposal:
 
 ```text
-governance.state = new | candidate_exists | installed
+governance.state = new | dismissed | candidate_exists | installed
 governance.exactDigestCandidateIds
 governance.evidenceRefreshAvailable
 governance.candidates[]
@@ -153,6 +153,8 @@ Important distinction:
 `readyForSubmit` is true only when validation passes and governance state is `new`.
 
 Discovery never revises an existing Candidate automatically when evidence refreshes.
+
+A proposal with the exact same digest as a dismissed Candidate reports `governance.state=dismissed` and stays non-submit-ready, so the user is not nagged again. If later evidence changes the draft digest, the old dismissed Candidate no longer blocks the refreshed proposal; it can return to `governance.state=new` and be explicitly submitted as a new Candidate.
 
 The regression also promotes a discovered Candidate through the normal governed test path and verifies that the same proposal subsequently reports `governance.state=installed`, with the active immutable Registry version visible to clients.
 
