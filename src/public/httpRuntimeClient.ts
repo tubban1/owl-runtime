@@ -12,7 +12,7 @@ import {
   type RuntimeClient,
   type RuntimeClientInfo,
   type UserSkillRuntimeClient,
-  type WorkflowSkillDiscoveryRuntimeClient,
+  type WorkflowDiscoveryRuntimeClient,
   type WorkflowSkillDiscoveryRequest,
   type SkillRunRequest,
   type SkillCandidateSubmitRequest,
@@ -69,7 +69,7 @@ export type RuntimeInvokeOptions = {
   signal?: AbortSignal;
 };
 
-export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowSkillDiscoveryRuntimeClient {
+export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient {
   private readonly baseUrl: string;
   private readonly sessionId: string;
   private readonly token?: string;
