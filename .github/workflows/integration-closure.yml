@@ -10,6 +10,7 @@ on:
       - feature/1.x-typed-public-dto
       - feature/1.x-schedule-pause-resume
       - feature/1.x-storage-foundation
+      - feature/1.x-storage-retention-gc
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -77,6 +78,9 @@ jobs:
 
       - name: Verify Storage Foundation
         run: npm run verify:storage-foundation
+
+      - name: Verify Storage Retention
+        run: npm run verify:storage-retention
 
       - name: Build Public Types
         run: npm run build:types
