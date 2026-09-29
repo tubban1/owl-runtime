@@ -3556,6 +3556,15 @@ export async function getCapabilityManifest(goal = "") {
         status: "candidate",
         clientInterface: "UserSkillRuntimeClient",
         namespaces: ["skill-candidates.*", "user-skills.*"],
+        workflowDiscovery: {
+          version: 1,
+          status: "candidate",
+          clientInterface: "WorkflowSkillDiscoveryRuntimeClient",
+          method: "skill-candidates.discover-workflows",
+          minSuccessfulRuns: 3,
+          writesCandidateStore: false,
+          autoPromotes: false,
+        },
       },
     },
     architecture: {
@@ -3609,6 +3618,8 @@ export async function getCapabilityManifest(goal = "") {
       semanticPromotion: "v0.9.8 explicit M2 → gate → M3 pipeline",
       userSkillRegistry:
         "1.x candidate: digest-bound Candidate → Persistent Test Task → M2/Verifier gates → immutable User Skill Registry",
+      workflowSkillDiscovery:
+        "1.x candidate: repeated verified M2 Primitive workflows → read-only draft proposal → explicit Candidate submit",
       globalEpisodicIndex: "v0.9.9 encrypted terminal-task experience index",
       hybridRecall:
         "v0.9.9 unified episodic + semantic lexical/vector recall",
