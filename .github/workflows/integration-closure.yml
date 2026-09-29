@@ -7,6 +7,7 @@ on:
       - feature/1.x-execution-revision
       - feature/1.x-tested-activation
       - feature/1.x-approval-resume
+      - feature/1.x-typed-public-dto
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -65,6 +66,9 @@ jobs:
 
       - name: Verify Approval Resume
         run: npm run verify:approval-resume
+
+      - name: Verify Public DTO
+        run: npm run verify:public-dto
 
       - name: Build Public Types
         run: npm run build:types
