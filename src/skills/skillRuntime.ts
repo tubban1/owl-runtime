@@ -3665,6 +3665,15 @@ export async function getCapabilityManifest(goal = "") {
         physicalPathsPublic: false,
         deletionAuthority: "runtime",
       },
+      storageRetention: {
+        version: 1,
+        status: "candidate",
+        policyOwner: "runtime",
+        gracePeriodDefaultDays: 7,
+        sharedObjectReferenceSafe: true,
+        pinSupported: true,
+        auditHoldSupported: true,
+      },
     },
     architecture: {
       name: identity.productName,
