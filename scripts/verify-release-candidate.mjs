@@ -54,6 +54,8 @@ const checks = [
   ]],
   ["primitive-isa", "npm", ["run", "verify:isa"]],
   ["skill-abi", "npm", ["run", "verify:skill-abi"]],
+  ["user-skills", "npm", ["run", "verify:user-skills"]],
+  ["workflow-discovery", "npm", ["run", "verify:workflow-discovery"]],
   ["observation-abi", "npm", ["run", "verify:observation-abi"]],
   ["verifier-abi", "npm", ["run", "verify:verifier-abi"]],
   ["action-observation", "npm", ["run", "verify:action-observation"]],
