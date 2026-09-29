@@ -124,6 +124,16 @@ try {
   assert.equal(executionTargets.defaultTarget, "host");
   assert.equal(executionTargets.silentFallback, false);
 
+  const publicEvents = await client.listEvents({
+    afterCursor: "runtime-events:0",
+    limit: 100,
+    types: ["agent_request.proposed", "agent_request.withdrawn"],
+  });
+  assert.deepEqual(publicEvents.events, []);
+  assert.equal(publicEvents.nextCursor, "runtime-events:0");
+  assert.equal(publicEvents.hasMore, false);
+  assert.equal(publicEvents.retention.newestSequence, null);
+
   const diagnostics = (await client.getDiagnostics({
     auditLimit: 0,
   })) as any;
@@ -174,6 +184,7 @@ try {
     crossSessionProcessCapabilityAccepted: true,
     fileObservationAndVerificationOverHttp: true,
     executionTargetManifestOverHttp: true,
+    durablePublicEventsOverHttp: true,
     diagnosticsOverHttp: true,
     missingLogicalSessionRejected: true,
     productionBearerTokenRequired: true,

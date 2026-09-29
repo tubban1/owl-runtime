@@ -467,17 +467,90 @@ function draftFromEvent(event: RuntimePublicEvent): RuntimePublicEventDraft {
   return draft;
 }
 
-function equivalentDraft(
-  left: RuntimePublicEventDraft,
-  right: RuntimePublicEventDraft,
-): boolean {
-  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+function lockPath(): string {
+  return path.join(journalDir(), "journal.lock");
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function withJournalFileLock<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  await ensureDir();
+  const startedAt = Date.now();
+
+  while (true) {
+    let handle: fs.FileHandle | undefined;
+    try {
+      handle = await fs.open(lockPath(), "wx", 0o600);
+      await handle.writeFile(
+        JSON.stringify({
+          pid: process.pid,
+          acquiredAt: new Date().toISOString(),
+        }) + "\n",
+        "utf8",
+      );
+      try {
+        return await operation();
+      } finally {
+        await handle.close().catch(() => undefined);
+        await fs.rm(lockPath(), { force: true }).catch(() => undefined);
+      }
+    } catch (error) {
+      await handle?.close().catch(() => undefined);
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+
+      let reclaim = false;
+      try {
+        const raw = JSON.parse(await fs.readFile(lockPath(), "utf8")) as {
+          pid?: unknown;
+        };
+        if (
+          typeof raw.pid === "number" &&
+          Number.isSafeInteger(raw.pid) &&
+          raw.pid > 0
+        ) {
+          reclaim = !processAlive(raw.pid);
+        }
+      } catch {
+        const stat = await fs.stat(lockPath()).catch(() => null);
+        reclaim = Boolean(
+          stat && Date.now() - stat.mtimeMs > 30_000,
+        );
+      }
+
+      if (reclaim) {
+        await fs.rm(lockPath(), { force: true }).catch(() => undefined);
+        continue;
+      }
+      if (Date.now() - startedAt > 10_000) {
+        throw new Error(
+          "PUBLIC_EVENT_JOURNAL_BUSY: timed out waiting for the cross-process journal lock.",
+        );
+      }
+      await sleep(20);
+    }
+  }
 }
 
 let mutationTail: Promise<void> = Promise.resolve();
 
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
-  const run = mutationTail.then(operation, operation);
+  const locked = () => withJournalFileLock(operation);
+  const run = mutationTail.then(locked, locked);
   mutationTail = run.then(
     () => undefined,
     () => undefined,
@@ -556,6 +629,16 @@ function normalizeListRequest(
       ) {
         throw new Error("EVENT_LIST_TYPE_UNSUPPORTED: " + String(type));
       }
+    }
+    const requested = new Set(request.types);
+    if (
+      requested.size !== 2 ||
+      !requested.has("agent_request.proposed") ||
+      !requested.has("agent_request.withdrawn")
+    ) {
+      throw new Error(
+        "EVENT_LIST_TYPE_FILTER_INCOMPLETE_CHANNEL: v1 global sequence requires both AgentRequest event types.",
+      );
     }
   }
   if (

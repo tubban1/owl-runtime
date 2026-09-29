@@ -177,6 +177,15 @@ try {
     ),
   );
 
+  await assert.rejects(
+    () =>
+      client.listEvents({
+        afterCursor: "runtime-events:0",
+        types: ["agent_request.proposed"],
+      }),
+    /EVENT_LIST_TYPE_FILTER_INCOMPLETE_CHANNEL/,
+  );
+
   const first = await client.listEvents({
     afterCursor: "runtime-events:0",
     limit: 100,
@@ -478,6 +487,7 @@ try {
         permissionEscalationNotProposed: true,
         stateEventCrashBoundaryRecovered: true,
         publicRpcEventsList: true,
+        partialTypeFilterRejected: true,
       },
       null,
       2,

@@ -191,7 +191,15 @@ The v1 journal is an encrypted AES-256-GCM Runtime-owned state snapshot:
   public-events.key
 ~~~
 
-Each mutation uses write-to-temp plus atomic rename. The snapshot contains:
+Each mutation uses a Runtime-owned cross-process lock plus write-to-temp and
+atomic rename. This prevents two HTTP/MCP Runtime processes sharing a state root
+from allocating the same next sequence.
+
+A dead lock owner is reclaimable by PID liveness; an unparseable lock is only
+reclaimed after a conservative stale timeout. Lock acquisition otherwise fails
+closed with `PUBLIC_EVENT_JOURNAL_BUSY`.
+
+The snapshot contains:
 
 ~~~text
 journalVersion
@@ -417,10 +425,13 @@ the event consumer contract.
 ### v1 filter constraint
 
 The v1 public journal currently contains only the two AgentRequest event types.
-Desktop should request both types together. If unrelated public event families
-are added later, the contract must define channel/partition ordering before a
-filtered stream can be fed to a consumer that requires globally contiguous
-sequence numbers.
+Desktop should request both types together. Runtime v1 rejects a partial filter
+with `EVENT_LIST_TYPE_FILTER_INCOMPLETE_CHANNEL`; silently filtering one of
+the two types could manufacture a sequence gap for Desktop's strict consumer.
+
+If unrelated public event families are added later, the contract must define
+channel/partition ordering before a filtered stream can be fed to a consumer
+that requires globally contiguous sequence numbers.
 
 ## State schema compatibility
 
