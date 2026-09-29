@@ -1,0 +1,58 @@
+name: 1.x Integration Closure Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-integration-closure
+  pull_request:
+    branches:
+      - feature/1.x-agent-request-events
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-closure-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify Public Runtime Client
+        run: npm run verify:public-runtime-client
+
+      - name: Verify HTTP Runtime Client
+        run: npm run verify:http-runtime-client
+
+      - name: Verify User Skill Registry
+        run: npm run verify:user-skills
+
+      - name: Verify Workflow Discovery
+        run: npm run verify:workflow-discovery
+
+      - name: Verify Public Event Journal
+        run: npm run verify:public-events
+
+      - name: Verify Consequential Request Replay
+        run: npm run verify:request-replay
+
+      - name: Build Public Types
+        run: npm run build:types
