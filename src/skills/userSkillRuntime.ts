@@ -14,7 +14,10 @@ import {
 } from "../tasks/taskRuntime.js";
 import { readPersistentTask } from "../tasks/taskStore.js";
 import { buildTaskEvidenceReceipt } from "../runtime/taskEvidence.js";
-import { inspectPromotionCandidate } from "../runtime/memoryPromotion.js";
+import {
+  detectObviousSecrets,
+  inspectPromotionCandidate,
+} from "../runtime/memoryPromotion.js";
 import { readGlobalEpisode } from "../runtime/episodicStore.js";
 import { authorizeSkill } from "../policy/approvalPolicy.js";
 import { injectTestFault } from "../runtime/faultInjection.js";
@@ -490,6 +493,18 @@ export function validateUserSkillManifest(
         "$",
         "Candidate content does not match the digest bound to this revision.",
         { actual: actualDigest, required: candidateDigest },
+      ),
+    );
+  }
+
+  const secretMatches = detectObviousSecrets(JSON.stringify(stableValue(raw)));
+  if (secretMatches.length > 0) {
+    errors.push(
+      issue(
+        "USER_SKILL_EMBEDDED_SECRET_BLOCKED",
+        "$",
+        "User Skill manifests must not embed credentials or secret material. Pass secrets through governed inputs/providers instead.",
+        { actual: secretMatches },
       ),
     );
   }
