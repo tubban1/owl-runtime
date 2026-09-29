@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { StagedArtifact } from "./taskStaging.js";
 import type { ExecutionTarget } from "../runtime/executionTarget.js";
+import type { ExecutionRevision } from "./executionRevision.js";
 import type { Observation } from "../observation/observationAbi.js";
 import type {
   VerificationReceipt,
@@ -87,6 +88,7 @@ export interface PersistentTask {
   label: string;
   ownerSessionId?: string;
   provenance?: PersistentTaskProvenance;
+  executionRevision?: ExecutionRevision;
   executionTarget?: ExecutionTarget;
   createdAt: string;
   updatedAt: string;
