@@ -153,3 +153,10 @@ export type PublicDeleteReceiptV1 = {
   deleted: true;
   [key: string]: unknown;
 };
+
+export type PublicApprovalActionResultV1 = {
+  schemaVersion: 1;
+  approval: PublicApprovalV1;
+  resume?: Record<string, unknown> | null;
+  task?: PublicTaskDetailV1 | null;
+};
