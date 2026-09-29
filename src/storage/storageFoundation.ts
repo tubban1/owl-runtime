@@ -186,12 +186,7 @@ async function commitObject(
     await verifyObjectBytes(objectPath, digestHex);
     return objectPath;
   } catch (error) {
-    if (
-      error instanceof Error &&
-      !error.message.startsWith("STORAGE_OBJECT_MISSING")
-    ) {
-      throw error;
-    }
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 
   const temp = path.join(
