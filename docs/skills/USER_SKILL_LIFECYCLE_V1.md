@@ -419,6 +419,36 @@ Recommended order:
 - self-modifying provider code;
 - autonomous source repair.
 
+## Phase 2A implementation: repeated workflow discovery
+
+The first repeated-work distillation layer is now implemented as a read-only proposal generator.
+
+```text
+verified M2 Task episodes
+        ↓
+repeated Primitive workflow grouping
+        ↓
+scalar argument parameterization
+        ↓
+draft User Skill manifest
+        ↓
+existing deterministic validator
+        ↓
+proposal only
+```
+
+Default discovery requires three completed runs, at least two Primitive steps, resolved verification, no unresolved side effects, and matching normalized label / Primitive topology / verification structure.
+
+Candidate-test and installed-User-Skill Tasks are excluded so Skills do not recursively train on their own derived executions.
+
+Discovery does not call `skill-candidates.submit`. Desktop/Worker/ChatGPT must explicitly submit the proposed manifest before the existing Candidate lifecycle begins.
+
+A new manifest secret gate also prevents constant credentials/tokens from being distilled into immutable Skill content.
+
+Historical M2 evidence digests are treated as creation-time evidence identities. Runtime may append later bookkeeping events to the source Task, so discovery re-validates current Task success but does not require a later recomputed Task digest to equal the stored M2 digest.
+
+See `WORKFLOW_SKILL_DISCOVERY_V1.md`.
+
 ## Core safety invariant
 
 OWL may automatically **learn that a reusable procedure probably exists**.
