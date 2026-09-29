@@ -18,6 +18,7 @@ export type ExecutionContext = {
   requestId: string;
   origin: ExecutionOrigin;
   taskId?: string;
+  stepId?: string;
   loopId?: string;
   scheduleId?: string;
   tool?: string;
