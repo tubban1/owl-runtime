@@ -1,0 +1,45 @@
+name: 1.x Schedule Pause Resume Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-schedule-pause-resume
+  pull_request:
+    branches:
+      - feature/1.x-typed-public-dto
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schedule-pause-resume-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schedule-pause-resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Verify Scheduler
+        run: npm run verify:scheduler
+      - name: Verify Schedule Pause Resume
+        run: npm run verify:schedule-pause-resume
+      - name: Verify Public DTO
+        run: npm run verify:public-dto
+      - name: Verify Approval Resume
+        run: npm run verify:approval-resume
+      - name: Verify HTTP Runtime Client
+        run: npm run verify:http-runtime-client
+      - name: Build Public Types
+        run: npm run build:types
