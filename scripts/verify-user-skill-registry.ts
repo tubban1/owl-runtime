@@ -22,6 +22,8 @@ process.env.SEMANTIC_MEMORY_KEY_PATH = path.join(scratch, "semantic.key");
 process.env.SKILL_CANDIDATE_DIR = path.join(scratch, "skill-candidates");
 process.env.USER_SKILL_DIR = path.join(scratch, "user-skills");
 process.env.USER_SKILL_KEY_PATH = path.join(scratch, "user-skills.key");
+process.env.RUNTIME_PUBLIC_EVENT_DIR = path.join(scratch, "public-events");
+process.env.RUNTIME_PUBLIC_EVENT_KEY_PATH = path.join(scratch, "public-events.key");
 
 const {
   submitSkillCandidate,

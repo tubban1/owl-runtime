@@ -51,5 +51,8 @@ jobs:
       - name: Verify Workflow Discovery
         run: npm run verify:workflow-discovery
 
+      - name: Verify Public Event Journal
+        run: npm run verify:public-events
+
       - name: Build Public Types
         run: npm run build:types
