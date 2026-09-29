@@ -33,6 +33,18 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Verify Skill ABI
+        run: npm run verify:skill-abi
+
+      - name: Verify Semantic Memory
+        run: npm run verify:semantic-memory
+
+      - name: Verify Public Runtime Client
+        run: npm run verify:public-runtime-client
+
+      - name: Verify HTTP Runtime Client
+        run: npm run verify:http-runtime-client
+
       - name: Verify User Skill Registry
         run: npm run verify:user-skills
 
