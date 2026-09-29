@@ -31,6 +31,15 @@ import {
   type UserSkillUninstallRequest,
 } from "./runtimeClient.js";
 import type { RuntimeRpcMethod } from "./runtimeRpc.js";
+import type {
+  PublicApprovalActionResultV1,
+  PublicApprovalV1,
+  PublicDeleteReceiptV1,
+  PublicRunReceiptV1,
+  PublicScheduleV1,
+  PublicTaskDetailV1,
+  PublicTaskSummaryV1,
+} from "./runtimeDtos.js";
 
 type RpcSuccess = {
   ok: true;
@@ -176,11 +185,11 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
     return payload.result;
   }
 
-  private async rpc(
+  private async rpc<T = unknown>(
     method: RuntimeRpcMethod,
     params?: unknown,
-  ): Promise<unknown> {
-    return await this.invoke(method, params);
+  ): Promise<T> {
+    return (await this.invoke(method, params)) as T;
   }
 
   async info(): Promise<RuntimeClientInfo> {
@@ -290,8 +299,8 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
     return await this.rpc("user-skills.uninstall", request);
   }
 
-  async createTask(request: CreateTaskRequest): Promise<unknown> {
-    return await this.rpc("tasks.create", request);
+  async createTask(request: CreateTaskRequest): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.create", request);
   }
 
   async activateExecutionRevision(
@@ -302,72 +311,98 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
 
   async createTaskFromActivation(
     request: CreateTaskFromActivationRequest,
-  ): Promise<unknown> {
-    return await this.rpc("execution-revisions.create-task", request);
+  ): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>(
+      "execution-revisions.create-task",
+      request,
+    );
   }
 
-  async listTasks(): Promise<unknown> {
-    return await this.rpc("tasks.list");
+  async listTasks(): Promise<PublicTaskSummaryV1[]> {
+    return await this.rpc<PublicTaskSummaryV1[]>("tasks.list");
   }
 
-  async getTask(taskId: string, includeResults = false): Promise<unknown> {
-    return await this.rpc("tasks.get", { taskId, includeResults });
+  async getTask(
+    taskId: string,
+    includeResults = false,
+  ): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.get", {
+      taskId,
+      includeResults,
+    });
   }
 
-  async runTask(request: RunTaskRequest): Promise<unknown> {
-    return await this.rpc("tasks.run", request);
+  async runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1> {
+    return await this.rpc<PublicRunReceiptV1>("tasks.run", request);
   }
 
-  async pauseTask(taskId: string): Promise<unknown> {
-    return await this.rpc("tasks.pause", { taskId });
+  async pauseTask(taskId: string): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.pause", { taskId });
   }
 
-  async cancelTask(taskId: string): Promise<unknown> {
-    return await this.rpc("tasks.cancel", { taskId });
+  async cancelTask(taskId: string): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.cancel", { taskId });
   }
 
-  async resolveTaskStep(request: ResolveTaskStepRequest): Promise<unknown> {
-    return await this.rpc("tasks.resolve", request);
+  async resolveTaskStep(
+    request: ResolveTaskStepRequest,
+  ): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.resolve", request);
   }
 
-  async deleteTask(taskId: string): Promise<unknown> {
-    return await this.rpc("tasks.delete", { taskId });
+  async deleteTask(taskId: string): Promise<PublicDeleteReceiptV1> {
+    return await this.rpc<PublicDeleteReceiptV1>("tasks.delete", { taskId });
   }
 
-  async createSchedule(request: CreateScheduleRequest): Promise<unknown> {
-    return await this.rpc("schedules.create", request);
+  async createSchedule(request: CreateScheduleRequest): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.create", request);
   }
 
-  async listSchedules(): Promise<unknown> {
-    return await this.rpc("schedules.list");
+  async listSchedules(): Promise<PublicScheduleV1[]> {
+    return await this.rpc<PublicScheduleV1[]>("schedules.list");
   }
 
-  async getSchedule(scheduleId: string): Promise<unknown> {
-    return await this.rpc("schedules.get", { scheduleId });
+  async getSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.get", { scheduleId });
   }
 
-  async cancelSchedule(scheduleId: string): Promise<unknown> {
-    return await this.rpc("schedules.cancel", { scheduleId });
+  async cancelSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.cancel", { scheduleId });
   }
 
-  async deleteSchedule(scheduleId: string): Promise<unknown> {
-    return await this.rpc("schedules.delete", { scheduleId });
+  async deleteSchedule(scheduleId: string): Promise<PublicDeleteReceiptV1> {
+    return await this.rpc<PublicDeleteReceiptV1>("schedules.delete", { scheduleId });
   }
 
-  async listApprovals(state?: ApprovalState): Promise<unknown> {
-    return await this.rpc("approvals.list", state ? { state } : {});
+  async listApprovals(state?: ApprovalState): Promise<PublicApprovalV1[]> {
+    return await this.rpc<PublicApprovalV1[]>(
+      "approvals.list",
+      state ? { state } : {},
+    );
   }
 
-  async getApproval(approvalId: string): Promise<unknown> {
-    return await this.rpc("approvals.get", { approvalId });
+  async getApproval(approvalId: string): Promise<PublicApprovalV1> {
+    return await this.rpc<PublicApprovalV1>("approvals.get", { approvalId });
   }
 
-  async approve(approvalId: string, confirm: boolean): Promise<unknown> {
-    return await this.rpc("approvals.approve", { approvalId, confirm });
+  async approve(
+    approvalId: string,
+    confirm: boolean,
+  ): Promise<PublicApprovalActionResultV1> {
+    return await this.rpc<PublicApprovalActionResultV1>(
+      "approvals.approve",
+      { approvalId, confirm },
+    );
   }
 
-  async deny(approvalId: string, confirm: boolean): Promise<unknown> {
-    return await this.rpc("approvals.deny", { approvalId, confirm });
+  async deny(
+    approvalId: string,
+    confirm: boolean,
+  ): Promise<PublicApprovalActionResultV1> {
+    return await this.rpc<PublicApprovalActionResultV1>(
+      "approvals.deny",
+      { approvalId, confirm },
+    );
   }
 
   async process(request: ProcessRequest): Promise<unknown> {
