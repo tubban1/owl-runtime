@@ -47,6 +47,11 @@ import {
 } from "./executionRevision.js";
 import { buildTaskEvidenceReceipt } from "../runtime/taskEvidence.js";
 import {
+  ApprovalRequiredError,
+  listApprovals,
+  readApproval,
+} from "../policy/approvalPolicy.js";
+import {
   uncertainVerificationReceipt,
   verifyObservation,
   type VerificationReceipt,
@@ -68,6 +73,11 @@ type StepExecutionResult =
       ok: false;
       durationMs: number;
       error: string;
+      approvalRequired?: {
+        approvalId: string;
+        fingerprint: string;
+        requestedAt: string;
+      };
     };
 
 const INSTANCE_ID = randomUUID();
@@ -238,6 +248,13 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       completedAt: step.completedAt ?? null,
       error: step.error ?? null,
       recoveryNote: step.recoveryNote ?? null,
+      approval: step.approvalId
+        ? {
+            id: step.approvalId,
+            fingerprint: step.approvalFingerprint ?? null,
+            requestedAt: step.approvalRequestedAt ?? null,
+          }
+        : null,
       observation: step.observation
         ? {
             id: step.observation.observationId,
@@ -278,12 +295,36 @@ async function recoverInterruptedTask(task: PersistentTask): Promise<PersistentT
   if (!isOtherRuntime) return task;
 
   let needsReview = false;
+  let waitingApproval = false;
   let recovered = false;
+  const approvals = await listApprovals();
 
   for (const step of task.steps) {
     if (step.state !== "running") continue;
 
     recovered = true;
+    const pendingApproval = approvals.find(
+      (approval) =>
+        approval.ownerTaskId === task.id &&
+        approval.ownerStepId === step.id &&
+        (approval.state === "pending" || approval.state === "approved"),
+    );
+    if (pendingApproval) {
+      step.state = "waiting_approval";
+      step.approvalId = pendingApproval.id;
+      step.approvalFingerprint = pendingApproval.fingerprint;
+      step.approvalRequestedAt = pendingApproval.requestedAt;
+      waitingApproval = true;
+      step.recoveryNote =
+        "Recovered an approval boundary after Runtime restart; no action side effect is retried until the exact approval is consumed.";
+      appendTaskEvent(task, {
+        type: "step_waiting_approval_recovered",
+        stepId: step.id,
+        message: `Recovered pending approval ${pendingApproval.id} for ${step.id}.`,
+      });
+      continue;
+    }
+
     const retryPolicy =
       step.retryPolicy ?? (step.parallelSafe ? "automatic" : "manual");
 
@@ -310,7 +351,11 @@ async function recoverInterruptedTask(task: PersistentTask): Promise<PersistentT
   }
 
   if (recovered) {
-    task.status = needsReview ? "blocked" : "paused";
+    task.status = needsReview
+      ? "blocked"
+      : waitingApproval
+        ? "waiting_approval"
+        : "paused";
     task.runnerInstanceId = undefined;
     task.runnerPid = undefined;
     task.pauseRequested = false;
@@ -322,7 +367,9 @@ async function recoverInterruptedTask(task: PersistentTask): Promise<PersistentT
       type: "runtime_recovery",
       message: needsReview
         ? "Recovered after server restart; at least one interrupted state-changing step needs review."
-        : "Recovered after server restart; interrupted parallel-safe work can be resumed.",
+        : waitingApproval
+          ? "Recovered after server restart at an exact approval boundary."
+          : "Recovered after server restart; interrupted parallel-safe work can be resumed.",
     });
 
     await writePersistentTask(task);
@@ -637,6 +684,9 @@ export async function listPersistentTasks() {
       total: task.steps.length,
       pending: task.steps.filter((step) => step.state === "pending").length,
       running: task.steps.filter((step) => step.state === "running").length,
+      waitingApproval: task.steps.filter(
+        (step) => step.state === "waiting_approval",
+      ).length,
       succeeded: task.steps.filter((step) => step.state === "succeeded").length,
       failed: task.steps.filter((step) => step.state === "failed").length,
       needsReview: task.steps.filter((step) => step.state === "needs_review").length,
@@ -938,8 +988,118 @@ function chooseStatusAfterRun(task: PersistentTask): PersistentTask["status"] {
   if (task.cancelRequested) return "cancelled";
   if (task.steps.every((step) => step.state === "succeeded")) return "completed";
   if (task.steps.some((step) => step.state === "needs_review")) return "blocked";
+  if (task.steps.some((step) => step.state === "waiting_approval")) {
+    return "waiting_approval";
+  }
   if (task.steps.some((step) => step.state === "failed")) return "failed";
   return "paused";
+}
+
+export async function resumePersistentTaskAfterApproval(
+  taskId: string,
+  approvalId: string,
+) {
+  if (activeRuns.has(taskId)) {
+    throw new Error(
+      "APPROVAL_RESUME_TASK_ACTIVE: task is still executing; retry reconciliation after the current run settles.",
+    );
+  }
+  const approval = await readApproval(approvalId);
+  if (approval.state !== "approved") {
+    throw new Error(
+      "APPROVAL_RESUME_NOT_APPROVED: approval must be approved before Runtime resumes execution.",
+    );
+  }
+  if (approval.ownerTaskId !== taskId || !approval.ownerStepId) {
+    throw new Error(
+      "APPROVAL_RESUME_OWNER_MISMATCH: approval is not bound to this task step.",
+    );
+  }
+
+  const task = await loadTask(taskId);
+  const step = task.steps.find(
+    (item) =>
+      item.id === approval.ownerStepId &&
+      item.state === "waiting_approval" &&
+      item.approvalId === approval.id &&
+      item.approvalFingerprint === approval.fingerprint,
+  );
+  if (!step) {
+    throw new Error(
+      "APPROVAL_RESUME_STEP_MISMATCH: task is not waiting on this exact approval receipt.",
+    );
+  }
+
+  step.state = "pending";
+  step.recoveryNote = undefined;
+  task.status = task.steps.some((item) => item.state === "needs_review")
+    ? "blocked"
+    : "paused";
+  appendTaskEvent(task, {
+    type: "approval_resume_authorized",
+    stepId: step.id,
+    message:
+      `Approval ${approval.id} authorized resume of the same task/step execution.`,
+  });
+  await writePersistentTask(task);
+
+  if (task.status === "blocked") {
+    return {
+      resumed: false,
+      taskId,
+      stepId: step.id,
+      approvalId,
+      reason: "OTHER_STEP_NEEDS_REVIEW",
+      task: summarizeTask(task, false),
+    };
+  }
+
+  const result = await runPersistentTask(taskId, {
+    expectedRevisionDigest: task.executionRevision?.digest,
+  });
+  return {
+    resumed: true,
+    taskId,
+    stepId: step.id,
+    approvalId,
+    result,
+  };
+}
+
+export async function failPersistentTaskAfterApprovalDenial(
+  taskId: string,
+  approvalId: string,
+) {
+  if (activeRuns.has(taskId)) {
+    throw new Error(
+      "APPROVAL_DENIAL_TASK_ACTIVE: task is still executing; retry reconciliation after the current run settles.",
+    );
+  }
+  const approval = await readApproval(approvalId);
+  if (approval.state !== "denied") {
+    throw new Error("APPROVAL_DENIAL_STATE_INVALID");
+  }
+  const task = await loadTask(taskId);
+  const step = task.steps.find(
+    (item) =>
+      item.id === approval.ownerStepId &&
+      item.state === "waiting_approval" &&
+      item.approvalId === approval.id,
+  );
+  if (!step) {
+    throw new Error("APPROVAL_DENIAL_STEP_MISMATCH");
+  }
+  step.state = "failed";
+  step.error = "APPROVAL_DENIED: " + approval.id;
+  step.completedAt = new Date().toISOString();
+  task.status = "failed";
+  appendTaskEvent(task, {
+    type: "approval_denied",
+    stepId: step.id,
+    message: `Approval ${approval.id} was denied; the waiting execution terminated without the side effect.`,
+  });
+  await writePersistentTask(task);
+  return summarizeTask(task, false);
 }
 
 export async function runPersistentTask(
@@ -1152,6 +1312,7 @@ export async function runPersistentTask(
                 task.ownerSessionId ?? currentExecutionContext().sessionId,
               origin: "task",
               taskId: task.id,
+              stepId: step.id,
               executionTarget: normalizeExecutionTarget(task.executionTarget),
             },
             async () => {
@@ -1203,6 +1364,19 @@ export async function runPersistentTask(
                   result: executed.result,
                 };
               } catch (error) {
+                if (error instanceof ApprovalRequiredError) {
+                  return {
+                    id: step.id,
+                    ok: false as const,
+                    durationMs: Date.now() - stepStartedAt,
+                    error: error.message,
+                    approvalRequired: {
+                      approvalId: error.approval.id,
+                      fingerprint: error.approval.fingerprint,
+                      requestedAt: error.approval.requestedAt,
+                    },
+                  };
+                }
                 return {
                   id: step.id,
                   ok: false as const,
@@ -1339,6 +1513,21 @@ export async function runPersistentTask(
               });
             }
           }
+        } else if (result.approvalRequired) {
+          step.state = "waiting_approval";
+          step.completedAt = undefined;
+          step.error = undefined;
+          step.result = undefined;
+          step.approvalId = result.approvalRequired.approvalId;
+          step.approvalFingerprint = result.approvalRequired.fingerprint;
+          step.approvalRequestedAt = result.approvalRequired.requestedAt;
+          task.status = "waiting_approval";
+          appendTaskEvent(task, {
+            type: "step_waiting_approval",
+            stepId: step.id,
+            message:
+              `${step.action} is waiting for exact approval ${result.approvalRequired.approvalId}; no side effect executed.`,
+          });
         } else {
           step.state = "failed";
           step.error = result.error;
@@ -1357,7 +1546,12 @@ export async function runPersistentTask(
           durationMs: result.durationMs,
           ...(result.ok
             ? { result: result.result }
-            : { error: result.error }),
+            : result.approvalRequired
+              ? {
+                  waitingApproval: true,
+                  approvalId: result.approvalRequired.approvalId,
+                }
+              : { error: result.error }),
         });
       }
 
@@ -1370,6 +1564,15 @@ export async function runPersistentTask(
       });
 
       await writePersistentTask(task);
+
+      if (results.some((result) => !result.ok && result.approvalRequired)) {
+        task.status = "waiting_approval";
+        appendTaskEvent(task, {
+          type: "run_waiting_approval",
+          message: "Execution paused at an approval boundary and will resume on the same Task after approval.",
+        });
+        break;
+      }
 
       if (
         failFast &&
@@ -1390,6 +1593,8 @@ export async function runPersistentTask(
     if (task.status === "completed") {
       task.completedAt ??= new Date().toISOString();
     } else if (task.status === "paused") {
+      task.pausedAt ??= new Date().toISOString();
+    } else if (task.status === "waiting_approval") {
       task.pausedAt ??= new Date().toISOString();
     } else if (task.status === "blocked") {
       task.blockedAt ??= new Date().toISOString();
