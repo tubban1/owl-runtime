@@ -380,13 +380,16 @@ try {
   process.env.RUNTIME_PUBLIC_EVENT_DIR = path.join(retentionScratch, "events");
   process.env.RUNTIME_PUBLIC_EVENT_KEY_PATH = path.join(retentionScratch, "events.key");
   process.env.RUNTIME_PUBLIC_EVENT_RETENTION_MAX = "3";
+  let firstRetentionOccurredAt = "";
   for (let index = 1; index <= 5; index += 1) {
+    const occurredAt = new Date(Date.now() + index).toISOString();
+    if (index === 1) firstRetentionOccurredAt = occurredAt;
     await appendPublicRuntimeEvent({
       ...safeDraft,
       eventId: "evt_retention_" + index,
       proposalId: "proposal_retention_" + index,
       dedupeKey: "runtime:retention:" + index,
-      occurredAt: new Date(Date.now() + index).toISOString(),
+      occurredAt,
     });
   }
   await assert.rejects(
@@ -403,6 +406,28 @@ try {
   );
   assert.equal(retained.retention.oldestSequence, 3);
   assert.equal(retained.retention.newestSequence, 5);
+
+  // Replaying an event whose payload aged out of retention must keep its
+  // original sequence. Desktop treats same-eventId delivery as a no-op and
+  // would otherwise fail the next event as a sequence gap.
+  const expiredReplay = await appendPublicRuntimeEvent({
+    ...safeDraft,
+    eventId: "evt_retention_1",
+    proposalId: "proposal_retention_1",
+    dedupeKey: "runtime:retention:1",
+    occurredAt: firstRetentionOccurredAt,
+  });
+  assert.equal(expiredReplay.sequence, 1);
+  assert.equal(expiredReplay.cursor, "runtime-events:1");
+  const afterExpiredReplay = await listPublicRuntimeEvents({
+    afterCursor: "runtime-events:2",
+    limit: 10,
+  });
+  assert.deepEqual(
+    afterExpiredReplay.events.map((event) => event.sequence),
+    [3, 4, 5],
+  );
+  assert.equal(afterExpiredReplay.retention.newestSequence, 5);
 
   // Corruption is fail-closed, never treated as an empty journal.
   await fs.writeFile(
@@ -446,6 +471,7 @@ try {
         staleRevisionRejected: true,
         revisionDigestIdentity: true,
         cursorExpirationExplicit: true,
+        expiredEventIdKeepsOriginalSequence: true,
         journalCorruptionFailClosed: true,
         promptInjectionRejected: true,
         secretFieldRejected: true,

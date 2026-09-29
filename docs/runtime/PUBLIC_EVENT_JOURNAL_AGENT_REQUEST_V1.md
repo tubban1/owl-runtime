@@ -203,8 +203,24 @@ updatedAt
 The journal is not Task-local M2 and does not replace M2. It is a separate
 public projection plane with a separate schema version.
 
-The initial retention policy is count-based and defaults to 10,000 events.
-Retention is bounded before persistence.
+The initial payload-retention policy is count-based and defaults to 10,000
+events. Retention is bounded before persistence.
+
+The journal also keeps a payload-free event receipt:
+
+~~~text
+eventId -> original sequence + canonical event digest
+~~~
+
+after an event payload ages out. This is required for cross-file outbox crash
+recovery: a delayed replay of the same stable eventId returns its original
+sequence and is never reintroduced under a new sequence. Without this receipt,
+Desktop's frozen duplicate-event rule could correctly no-op the repeated
+eventId but then observe an artificial sequence gap on the following event.
+
+Receipts contain no prompt/content payload. v1 retains them as replay-safety
+metadata; future receipt compaction requires an explicit producer/outbox
+watermark and must not be inferred from payload retention alone.
 
 A damaged journal fails closed with:
 

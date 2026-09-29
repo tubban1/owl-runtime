@@ -91,10 +91,16 @@ type EncryptedEnvelope = {
   ciphertext: string;
 };
 
+type RuntimePublicEventReceipt = {
+  sequence: number;
+  digest: string;
+};
+
 type RuntimePublicEventJournalState = {
   version: typeof RUNTIME_PUBLIC_EVENT_JOURNAL_VERSION;
   lastSequence: number;
   events: RuntimePublicEvent[];
+  eventReceipts: Record<string, RuntimePublicEventReceipt>;
   updatedAt: string;
 };
 
@@ -159,10 +165,16 @@ const eventSchema = z.discriminatedUnion("eventType", [
   withdrawnEventSchema,
 ]);
 
+const eventReceiptSchema = z.object({
+  sequence: sequenceSchema,
+  digest: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
 const journalStateSchema = z.object({
   version: z.literal(RUNTIME_PUBLIC_EVENT_JOURNAL_VERSION),
   lastSequence: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   events: z.array(eventSchema),
+  eventReceipts: z.record(eventReceiptSchema).optional(),
   updatedAt: z.string().datetime(),
 }).strict();
 
@@ -302,8 +314,19 @@ function decrypt(
   return validateJournalState(JSON.parse(plaintext.toString("utf8")));
 }
 
+function draftDigest(draft: RuntimePublicEventDraft): string {
+  return createHash("sha256")
+    .update(JSON.stringify(stableValue(draft)))
+    .digest("hex");
+}
+
 function validateJournalState(value: unknown): RuntimePublicEventJournalState {
-  const state = journalStateSchema.parse(value) as RuntimePublicEventJournalState;
+  const parsed = journalStateSchema.parse(value);
+  const state: RuntimePublicEventJournalState = {
+    ...parsed,
+    eventReceipts: parsed.eventReceipts ?? {},
+  } as RuntimePublicEventJournalState;
+
   let previous = 0;
   const eventIds = new Set<string>();
   for (const event of state.events) {
@@ -318,7 +341,35 @@ function validateJournalState(value: unknown): RuntimePublicEventJournalState {
     }
     eventIds.add(event.eventId);
     previous = event.sequence;
+
+    const digest = draftDigest(draftFromEvent(event));
+    const existingReceipt = state.eventReceipts[event.eventId];
+    if (existingReceipt) {
+      if (
+        existingReceipt.sequence !== event.sequence ||
+        existingReceipt.digest !== digest
+      ) {
+        throw new Error("Public event journal receipt mismatch.");
+      }
+    } else {
+      state.eventReceipts[event.eventId] = {
+        sequence: event.sequence,
+        digest,
+      };
+    }
   }
+
+  const receiptSequences = Object.values(state.eventReceipts).map(
+    (receipt) => receipt.sequence,
+  );
+  if (
+    receiptSequences.some(
+      (sequence) => sequence < 1 || sequence > state.lastSequence,
+    )
+  ) {
+    throw new Error("Public event journal receipt sequence is invalid.");
+  }
+
   const newest = state.events.at(-1)?.sequence;
   if (newest !== undefined && newest !== state.lastSequence) {
     throw new Error("Public event journal lastSequence mismatch.");
@@ -331,6 +382,7 @@ function emptyState(): RuntimePublicEventJournalState {
     version: RUNTIME_PUBLIC_EVENT_JOURNAL_VERSION,
     lastSequence: 0,
     events: [],
+    eventReceipts: {},
     updatedAt: new Date().toISOString(),
   };
 }
@@ -445,16 +497,19 @@ export async function appendPublicRuntimeEvent(
   const draft = parseRuntimePublicEventDraft(value);
   return await serialized(async () => {
     const state = await readState();
-    const existing = state.events.find(
-      (event) => event.eventId === draft.eventId,
-    );
-    if (existing) {
-      if (!equivalentDraft(draftFromEvent(existing), draft)) {
+    const digest = draftDigest(draft);
+    const receipt = state.eventReceipts[draft.eventId];
+    if (receipt) {
+      if (receipt.digest !== digest) {
         throw new Error(
           "PUBLIC_EVENT_ID_CONFLICT: eventId already exists with different content.",
         );
       }
-      return existing;
+      return {
+        ...draft,
+        sequence: receipt.sequence,
+        cursor: cursorForSequence(receipt.sequence),
+      } as RuntimePublicEvent;
     }
 
     if (state.lastSequence >= Number.MAX_SAFE_INTEGER) {
@@ -468,6 +523,10 @@ export async function appendPublicRuntimeEvent(
     }) as RuntimePublicEvent;
 
     state.lastSequence = sequence;
+    state.eventReceipts[event.eventId] = {
+      sequence,
+      digest,
+    };
     state.events.push(event);
     const maxEvents = retentionLimit();
     if (state.events.length > maxEvents) {
