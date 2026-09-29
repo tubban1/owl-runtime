@@ -3656,6 +3656,15 @@ export async function getCapabilityManifest(goal = "") {
         defaultMissedRunPolicy: "skip",
         explicitCatchUp: true,
       },
+      storageFoundation: {
+        version: 1,
+        status: "candidate",
+        artifactIdentity: "artifactId",
+        objectAddressing: "sha256",
+        immutableObjects: true,
+        physicalPathsPublic: false,
+        deletionAuthority: "runtime",
+      },
     },
     architecture: {
       name: identity.productName,
