@@ -76,5 +76,7 @@ export {
   type PublicApprovalActionResultV1,
   type PublicScheduleTriggerV1,
   type PublicScheduleV1,
+  type PublicArtifactRetentionClassV1,
+  type PublicArtifactRefV1,
   type PublicDeleteReceiptV1,
 } from "./runtimeDtos.js";
