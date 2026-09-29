@@ -59,6 +59,21 @@ const RETRY_ORDER: Record<UserSkillRetryPolicy, number> = {
   never: 2,
 };
 
+const MAX_USER_SKILL_CANDIDATE_BYTES = 256 * 1024;
+
+function encodedCandidateBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(stableValue(value)), "utf8");
+}
+
+function assertCandidateSize(value: unknown): void {
+  const bytes = encodedCandidateBytes(value);
+  if (bytes > MAX_USER_SKILL_CANDIDATE_BYTES) {
+    throw new Error(
+      "USER_SKILL_CANDIDATE_TOO_LARGE: maximum encoded size is 256 KiB.",
+    );
+  }
+}
+
 
 const FORBIDDEN_USER_SKILL_PRIMITIVES = new Set([
   "sys.exec",
@@ -485,6 +500,21 @@ export function validateUserSkillManifest(
     String(entry.id),
   );
 
+  const encodedBytes = encodedCandidateBytes(raw);
+  if (encodedBytes > MAX_USER_SKILL_CANDIDATE_BYTES) {
+    errors.push(
+      issue(
+        "USER_SKILL_CANDIDATE_TOO_LARGE",
+        "$",
+        "User Skill Candidate exceeds the maximum encoded size of 256 KiB.",
+        {
+          actual: encodedBytes,
+          allowed: MAX_USER_SKILL_CANDIDATE_BYTES,
+        },
+      ),
+    );
+  }
+
   const actualDigest = userSkillDigest(raw);
   if (actualDigest !== candidateDigest) {
     errors.push(
@@ -629,10 +659,7 @@ export function validateUserSkillManifest(
 }
 
 export async function submitSkillCandidate(manifest: unknown) {
-  const encoded = JSON.stringify(stableValue(manifest));
-  if (Buffer.byteLength(encoded, "utf8") > 256 * 1024) {
-    throw new Error("USER_SKILL_CANDIDATE_TOO_LARGE: maximum encoded size is 256 KiB.");
-  }
+  assertCandidateSize(manifest);
   const digest = userSkillDigest(manifest);
   const id = newCandidateId(digest);
   return await withSkillGovernanceResources(
@@ -700,6 +727,7 @@ export async function reviseSkillCandidate(input: {
             record.currentDigest,
         );
       }
+      assertCandidateSize(input.manifest);
       const digest = userSkillDigest(input.manifest);
       if (digest === record.currentDigest) {
         return { idempotent: true, candidate: record };
