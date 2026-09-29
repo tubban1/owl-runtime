@@ -8,6 +8,7 @@ import type {
   PrimitiveCallRequest,
   ProcessRequest,
   ResolveTaskStepRequest,
+  ResumeScheduleRequest,
   RunTaskRequest,
   RuntimeClient,
   RuntimeEventRuntimeClient,
@@ -65,6 +66,8 @@ export const RUNTIME_RPC_METHODS = [
   "schedules.create",
   "schedules.list",
   "schedules.get",
+  "schedules.pause",
+  "schedules.resume",
   "schedules.cancel",
   "schedules.delete",
   "approvals.list",
@@ -253,6 +256,10 @@ export async function invokeRuntimeRpc(
       return await client.listSchedules();
     case "schedules.get":
       return await client.getSchedule(requiredString(object, "scheduleId"));
+    case "schedules.pause":
+      return await client.pauseSchedule(requiredString(object, "scheduleId"));
+    case "schedules.resume":
+      return await client.resumeSchedule(object as ResumeScheduleRequest);
     case "schedules.cancel":
       return await client.cancelSchedule(requiredString(object, "scheduleId"));
     case "schedules.delete":
