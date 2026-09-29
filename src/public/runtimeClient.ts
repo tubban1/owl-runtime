@@ -48,6 +48,8 @@ import {
   cancelPersistentSchedule,
   createPrimitiveSchedule,
   deletePersistentSchedule,
+  pausePersistentSchedule,
+  resumePersistentSchedule,
   getPersistentSchedule,
   listPersistentSchedules,
 } from "../runtime/scheduler.js";
@@ -267,6 +269,11 @@ export type CreateScheduleRequest = {
   executionTarget?: PublicExecutionTarget;
 };
 
+export type ResumeScheduleRequest = {
+  scheduleId: string;
+  missedRunPolicy?: "skip" | "catch_up";
+};
+
 export type ApprovalState =
   | "pending"
   | "approved"
@@ -381,6 +388,8 @@ export interface RuntimeClient {
   createSchedule(request: CreateScheduleRequest): Promise<PublicScheduleV1>;
   listSchedules(): Promise<PublicScheduleV1[]>;
   getSchedule(scheduleId: string): Promise<PublicScheduleV1>;
+  pauseSchedule(scheduleId: string): Promise<PublicScheduleV1>;
+  resumeSchedule(request: ResumeScheduleRequest): Promise<PublicScheduleV1>;
   cancelSchedule(scheduleId: string): Promise<PublicScheduleV1>;
   deleteSchedule(scheduleId: string): Promise<PublicDeleteReceiptV1>;
 
@@ -610,6 +619,18 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
 
   async getSchedule(scheduleId: string): Promise<PublicScheduleV1> {
     return await getPersistentSchedule(scheduleId);
+  }
+
+  async pauseSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await pausePersistentSchedule(scheduleId);
+  }
+
+  async resumeSchedule(
+    request: ResumeScheduleRequest,
+  ): Promise<PublicScheduleV1> {
+    return await resumePersistentSchedule(request.scheduleId, {
+      missedRunPolicy: request.missedRunPolicy,
+    });
   }
 
   async cancelSchedule(scheduleId: string): Promise<PublicScheduleV1> {
