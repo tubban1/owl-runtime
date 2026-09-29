@@ -5,6 +5,7 @@ import {
   artifactObjectPath,
   ensureStorageLayout,
   owlLabDataRoot,
+  verifyArtifactObject,
   type ArtifactRef,
   type RetentionClass,
 } from "./storageFoundation.js";
@@ -214,7 +215,8 @@ export async function registerArtifactReference(
   options: { root?: string; expiresAt?: string | null } = {},
 ): Promise<StorageReference> {
   const root = options.root ?? owlLabDataRoot();
-  return await mutateIndex(root, (index) => {
+  return await mutateIndex(root, async (index) => {
+    await verifyArtifactObject(artifact, root);
     const existing = index.references.find(
       (reference) => reference.artifact.artifactId === artifact.artifactId,
     );
@@ -409,8 +411,11 @@ export async function collectGarbage(options: {
     const deletedObjectIds: string[] = [];
     const retainedSharedObjectIds: string[] = [];
     let reclaimedBytes = 0;
+    const processedObjectIds = new Set<string>();
 
     for (const reference of eligible) {
+      if (processedObjectIds.has(reference.artifact.objectId)) continue;
+      processedObjectIds.add(reference.artifact.objectId);
       const group = objectGroups.get(reference.artifact.objectId) ?? [];
       const otherLive = group.some(
         (candidate) =>
