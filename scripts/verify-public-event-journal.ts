@@ -63,6 +63,75 @@ function semanticFailureManifest(version = "1.0.0") {
   };
 }
 
+
+function deterministicTypoManifest() {
+  return {
+    schemaVersion: 1,
+    skillAbiVersion: 1,
+    id: "user.deterministic_typo",
+    version: "1.0.0",
+    title: "Deterministic typo",
+    description: "An invalid Primitive op must remain a normal validation error.",
+    requiredPrimitiveAbi: 1,
+    requiredPrimitives: ["git.query"],
+    executionMode: "durable",
+    inputs: {},
+    contract: {
+      riskLevel: "low",
+      idempotent: true,
+      sideEffects: [],
+      retryPolicy: "automatic",
+      requiresVerification: false,
+      resources: [],
+    },
+    steps: [
+      {
+        id: "status",
+        primitive: "git.query",
+        op: "sttaus",
+        args: { cwd: root },
+      },
+    ],
+  };
+}
+
+function embeddedSecretManifest(secret: string) {
+  return {
+    schemaVersion: 1,
+    skillAbiVersion: 1,
+    id: "user.embedded_secret_repair",
+    version: "1.0.0",
+    title: "Embedded secret repair",
+    description: "Secret material must be rewritten into governed input/provider use.",
+    requiredPrimitiveAbi: 1,
+    requiredPrimitives: ["git.query"],
+    executionMode: "durable",
+    inputs: {
+      apiToken: {
+        type: "string",
+        required: false,
+        default: secret,
+      },
+    },
+    contract: {
+      riskLevel: "low",
+      idempotent: true,
+      sideEffects: [],
+      retryPolicy: "automatic",
+      requiresVerification: false,
+      resources: [],
+    },
+    steps: [
+      {
+        id: "status",
+        primitive: "git.query",
+        op: "status",
+        args: { cwd: root },
+      },
+    ],
+  };
+}
+
 function permissionEscalationManifest() {
   return {
     schemaVersion: 1,
@@ -461,6 +530,26 @@ try {
     6,
   );
 
+  // Ordinary deterministic validation errors remain in the normal Candidate
+  // repair surface and do not become AgentRequests.
+  const typo = (await submitSkillCandidate(
+    deterministicTypoManifest(),
+  )) as any;
+  const typoReport = (await validateSkillCandidate({
+    candidateId: typo.candidate.id,
+    expectedDigest: typo.candidate.currentDigest,
+  })) as any;
+  assert.equal(typoReport.valid, false);
+  assert.ok(
+    typoReport.errors.some(
+      (error: any) => error.code === "USER_SKILL_PRIMITIVE_OP_INVALID",
+    ),
+  );
+  assert.equal(
+    (await client.listEvents({ afterCursor: "runtime-events:0" })).events.length,
+    6,
+  );
+
   // Permission escalation is a deterministic policy rejection, not an LLM job.
   const escalation = (await submitSkillCandidate(
     permissionEscalationManifest(),
@@ -481,6 +570,51 @@ try {
     (await client.listEvents({ afterCursor: "runtime-events:0" })).events.length,
     6,
   );
+
+  // Embedded secret material may require semantic rewriting, but the public
+  // event must contain only the machine-readable error code and canonical ref.
+  const securityScratch = path.join(scratch, "security-producer");
+  process.env.SKILL_CANDIDATE_DIR = path.join(
+    securityScratch,
+    "skill-candidates",
+  );
+  process.env.USER_SKILL_DIR = path.join(securityScratch, "user-skills");
+  process.env.USER_SKILL_KEY_PATH = path.join(
+    securityScratch,
+    "user-skills.key",
+  );
+  process.env.RUNTIME_PUBLIC_EVENT_DIR = path.join(
+    securityScratch,
+    "public-events",
+  );
+  process.env.RUNTIME_PUBLIC_EVENT_KEY_PATH = path.join(
+    securityScratch,
+    "public-events.key",
+  );
+  const secretValue = "sk-proj-OWLRUNTIMESECRET123456789";
+  const secretCandidate = (await submitSkillCandidate(
+    embeddedSecretManifest(secretValue),
+  )) as any;
+  const secretReport = (await validateSkillCandidate({
+    candidateId: secretCandidate.candidate.id,
+    expectedDigest: secretCandidate.candidate.currentDigest,
+  })) as any;
+  assert.equal(secretReport.valid, false);
+  assert.ok(
+    secretReport.errors.some(
+      (error: any) => error.code === "USER_SKILL_EMBEDDED_SECRET_BLOCKED",
+    ),
+  );
+  const secretEvents = await client.listEvents({
+    afterCursor: "runtime-events:0",
+    limit: 100,
+  });
+  assert.equal(secretEvents.events.length, 1);
+  assert.deepEqual(
+    (secretEvents.events[0] as any).errorCodes,
+    ["USER_SKILL_EMBEDDED_SECRET_BLOCKED"],
+  );
+  assert.equal(JSON.stringify(secretEvents).includes(secretValue), false);
 
   // Strict public schema rejects prompt/payload/secret/permission channels.
   const safeDraft: any = {
@@ -616,7 +750,9 @@ try {
         journalCorruptionFailClosed: true,
         promptInjectionRejected: true,
         secretFieldRejected: true,
+        deterministicTypoNotProposed: true,
         permissionEscalationNotProposed: true,
+        embeddedSecretRepairProposedWithoutSecretLeak: true,
         stateEventCrashBoundaryRecovered: true,
         crossProcessSequenceNoGaps: true,
         publicRpcEventsList: true,

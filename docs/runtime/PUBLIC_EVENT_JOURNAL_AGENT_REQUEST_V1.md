@@ -344,9 +344,6 @@ semantic-repair classes:
 
 ~~~text
 USER_SKILL_PRIMITIVE_ABI_UNSUPPORTED
-USER_SKILL_PRIMITIVE_OP_INVALID
-USER_SKILL_INPUT_REFERENCE_UNKNOWN
-USER_SKILL_STEP_REFERENCE_UNKNOWN
 USER_SKILL_EMBEDDED_SECRET_BLOCKED
 ~~~
 
@@ -358,9 +355,15 @@ revision, which Desktop can dereference through the existing
 
 The event does not copy manifest/source content.
 
-No AgentRequest is produced for normal schema errors, deterministic contract
-normalization, ordinary metadata mistakes, deterministic retries, Approval,
-permission escalation, or forbidden capability attempts such as `sys.exec`.
+No AgentRequest is produced for normal schema errors, invalid Primitive-op
+typos, unknown input/step references, deterministic contract normalization,
+ordinary metadata mistakes, deterministic retries, Approval, permission
+escalation, or forbidden capability attempts such as `sys.exec`.
+
+This is intentionally narrower than the set of all validation failures.
+Additional error classes may be promoted to the semantic producer only after
+they have a deterministic classifier showing Runtime cannot safely normalize
+or resolve them itself.
 
 Runtime has no LLM in this producer.
 
@@ -464,7 +467,9 @@ governed Runtime state migration registry.
 - explicit cursor expiration/retention gap;
 - corrupt journal fail-closed;
 - strict prompt/instructions/payload/secret/permission-field rejection;
+- invalid Primitive-op typo remains a normal validation error;
 - permission escalation not converted into semantic work;
+- embedded-secret repair proposal contains no secret value;
 - state-commit / event-append crash boundary;
 - journal-append / outbox-ack crash boundary;
 - four concurrent Runtime writer processes with one gap-free global sequence;
