@@ -25,6 +25,7 @@ export type ApprovalRecord = {
   consumedAt?: string;
   ownerSessionId: string;
   ownerTaskId?: string;
+  ownerStepId?: string;
   reason: string;
 };
 
@@ -144,11 +145,26 @@ function skillRequiresApproval(skill: string, args: Record<string, unknown>) {
 }
 
 async function findMatching(fingerprint: string) {
+  const context = currentExecutionContext();
   const records = await listApprovals();
-  return records.find(
-    (record) => record.fingerprint === fingerprint &&
-      (record.state === "approved" || record.state === "pending"),
-  );
+  return records.find((record) => {
+    if (
+      record.fingerprint !== fingerprint ||
+      (record.state !== "approved" && record.state !== "pending")
+    ) {
+      return false;
+    }
+    if (context.taskId) {
+      return (
+        record.ownerTaskId === context.taskId &&
+        record.ownerStepId === context.stepId
+      );
+    }
+    return (
+      record.ownerTaskId === undefined &&
+      record.ownerSessionId === context.sessionId
+    );
+  });
 }
 
 async function createRequest(input: {
@@ -175,6 +191,7 @@ async function createRequest(input: {
     expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString(),
     ownerSessionId: context.sessionId,
     ...(context.taskId ? { ownerTaskId: context.taskId } : {}),
+    ...(context.stepId ? { ownerStepId: context.stepId } : {}),
     reason: `${input.subjectType} ${input.subject} requires explicit approval under the active OWL policy.`,
   };
   await writeRecord(record);
@@ -270,6 +287,12 @@ export function getApprovalPolicyStatus() {
     configuredApprovalSideEffects: csvEnv("OWL_APPROVAL_SIDE_EFFECTS") ?? null,
     configuredApprovalSkills: csvEnv("OWL_APPROVAL_SKILLS") ?? null,
     semanticDefaults: ["wechat.send(send=true)", "wechat.session(send)", "email.compose(send=true)", "xhs.publish(publish=true)"],
-    receipt: { oneTime: true, ttlMinutes: 15, boundToExactArgsFingerprint: true },
+    receipt: {
+      oneTime: true,
+      ttlMinutes: 15,
+      boundToExactArgsFingerprint: true,
+      boundToExecutionOwner: true,
+      taskStepBoundWhenApplicable: true,
+    },
   };
 }
