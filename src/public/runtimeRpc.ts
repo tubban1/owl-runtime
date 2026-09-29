@@ -95,9 +95,7 @@ function optionalBoolean(object: JsonObject, key: string): boolean | undefined {
 }
 
 function requireUserSkillRuntimeClient(
-  client: RuntimeClient &
-    Partial<UserSkillRuntimeClient> &
-    Partial<WorkflowDiscoveryRuntimeClient>,
+  client: RuntimeClient & Partial<UserSkillRuntimeClient>,
 ): UserSkillRuntimeClient {
   const required: Array<keyof UserSkillRuntimeClient> = [
     "submitSkillCandidate",
@@ -140,7 +138,9 @@ function requireWorkflowDiscoveryRuntimeClient(
 }
 
 export async function invokeRuntimeRpc(
-  client: RuntimeClient & Partial<UserSkillRuntimeClient>,
+  client: RuntimeClient &
+    Partial<UserSkillRuntimeClient> &
+    Partial<WorkflowDiscoveryRuntimeClient>,
   method: RuntimeRpcMethod,
   params?: unknown,
 ): Promise<unknown> {
