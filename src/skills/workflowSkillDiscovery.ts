@@ -141,13 +141,25 @@ function scalarType(
     : null;
 }
 
-function inputName(stepId: string, path: string[]): string {
-  const raw = [stepId, ...path]
-    .join("_")
+export function workflowDiscoveryParameterName(
+  stepId: string,
+  path: string[],
+): string {
+  const logical = [stepId, ...path].join("_");
+  const normalized = logical
     .replace(/[^A-Za-z0-9_]/g, "_")
     .replace(/_+/g, "_");
-  const prefixed = /^[A-Za-z_]/.test(raw) ? raw : `input_${raw}`;
-  return prefixed.slice(0, 64);
+  const prefixed = /^[A-Za-z_]/.test(normalized)
+    ? normalized
+    : `input_${normalized}`;
+  const needsSuffix =
+    prefixed !== logical ||
+    prefixed.length > 64;
+  if (!needsSuffix) return prefixed;
+
+  const suffix = digest(logical).slice(0, 10);
+  const prefix = prefixed.slice(0, 53).replace(/_+$/g, "") || "input";
+  return `${prefix}_${suffix}`.slice(0, 64);
 }
 
 function mergeGeneralized(
@@ -176,7 +188,10 @@ function generalizeValues(
 
   const type = scalarType(values);
   if (type) {
-    const name = inputName(stepId, path.length > 0 ? path : ["value"]);
+    const name = workflowDiscoveryParameterName(
+      stepId,
+      path.length > 0 ? path : ["value"],
+    );
     result.value = { $input: name };
     result.inputs[name] = {
       type,
