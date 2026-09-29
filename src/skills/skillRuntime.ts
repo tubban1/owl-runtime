@@ -3614,6 +3614,15 @@ export async function getCapabilityManifest(goal = "") {
         mutationAfterCreate: false,
         purpose: "bind-tested-and-executed-plan",
       },
+      executionActivation: {
+        version: 1,
+        status: "candidate",
+        model: "tested-revision-evidence-receipt",
+        activate: "execution-revisions.activate",
+        instantiate: "execution-revisions.create-task",
+        atomicAuthority: "encrypted-test-task-record",
+        purpose: "bind-test-evidence-to-exact-production-revision",
+      },
     },
     architecture: {
       name: identity.productName,
