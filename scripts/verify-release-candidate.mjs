@@ -69,6 +69,7 @@ const checks = [
   ["support-package", "npm", ["run", "verify:support-package"]],
   ["public-runtime-client", "npm", ["run", "verify:public-runtime-client"]],
   ["http-runtime-client", "npm", ["run", "verify:http-runtime-client"]],
+  ["provider-telemetry", "npm", ["run", "verify:provider-telemetry"]],
   ["task-memory", "npm", ["run", "verify:task-memory"]],
   ["scheduler", "npm", ["run", "verify:scheduler"]],
   ["loop", "npm", ["run", "verify:loop"]],
