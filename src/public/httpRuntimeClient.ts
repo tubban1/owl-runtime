@@ -69,6 +69,7 @@ export type HttpRuntimeClientOptions = {
 
 export type RuntimeInvokeOptions = {
   requestId?: string;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 };
 
@@ -104,6 +105,9 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
         "user-agent": this.userAgent,
         "x-owl-session-id": this.sessionId,
         "x-owl-request-id": requestId,
+        ...(options.idempotencyKey
+          ? { "x-owl-idempotency-key": options.idempotencyKey }
+          : {}),
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
       },
       body: JSON.stringify({
