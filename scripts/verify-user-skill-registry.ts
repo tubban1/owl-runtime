@@ -28,6 +28,8 @@ const {
   getSkillCandidate,
   reviseSkillCandidate,
   validateSkillCandidate,
+  validateUserSkillManifest,
+  userSkillDigest,
   compileSkillCandidateTest,
   inspectSkillCandidate,
   promoteSkillCandidate,
@@ -317,6 +319,43 @@ try {
   assert.match(
     String(concurrentRejection.reason),
     /USER_SKILL_CANDIDATE_DIGEST_MISMATCH/,
+  );
+
+  // 3c. Candidate size is one invariant across draft validation, submit and revision.
+  const oversizedManifest = repoHealthManifest("3.0.0") as any;
+  oversizedManifest.id = "user.oversized_candidate";
+  oversizedManifest.steps[0].args.cwd = "x".repeat(300 * 1024);
+  const oversizedDigest = userSkillDigest(oversizedManifest);
+  const oversizedReport = validateUserSkillManifest(
+    "candidate_oversized_preview",
+    oversizedDigest,
+    oversizedManifest,
+  ).report;
+  assert.equal(oversizedReport.valid, false);
+  assert.ok(
+    oversizedReport.errors.some(
+      (error: any) => error.code === "USER_SKILL_CANDIDATE_TOO_LARGE",
+    ),
+  );
+  await assert.rejects(
+    () => submitSkillCandidate(oversizedManifest),
+    /USER_SKILL_CANDIDATE_TOO_LARGE/,
+  );
+  await assert.rejects(
+    () =>
+      reviseSkillCandidate({
+        candidateId: repaired.candidate.id,
+        expectedDigest: repaired.candidate.currentDigest,
+        manifest: oversizedManifest,
+      }),
+    /USER_SKILL_CANDIDATE_TOO_LARGE/,
+  );
+  const afterOversizedRevision = (await getSkillCandidate(
+    repaired.candidate.id,
+  )) as any;
+  assert.equal(
+    afterOversizedRevision.currentDigest,
+    repaired.candidate.currentDigest,
   );
 
   // 4. Primitive ABI mismatch.
