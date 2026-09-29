@@ -61,7 +61,8 @@
     "verify:browser-cancellation": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-cancellation.ts",
     "verify:desktop-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-desktop-postconditions.ts",
     "verify:rc-fast": "node scripts/verify-release-candidate.mjs",
-    "verify:rc": "npm run verify:rc-fast && npm run soak:smoke"
+    "verify:rc": "npm run verify:rc-fast && npm run soak:smoke",
+    "verify:provider-telemetry": "OWL_RUNTIME_MODE=test tsx scripts/verify-provider-telemetry.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
