@@ -10,6 +10,7 @@ import {
   type PrimitiveCallRequest,
   type ProcessRequest,
   type ResolveTaskStepRequest,
+  type ResumeScheduleRequest,
   type RunTaskRequest,
   type RuntimeClient,
   type RuntimeClientInfo,
@@ -364,6 +365,16 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
 
   async getSchedule(scheduleId: string): Promise<PublicScheduleV1> {
     return await this.rpc<PublicScheduleV1>("schedules.get", { scheduleId });
+  }
+
+  async pauseSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.pause", { scheduleId });
+  }
+
+  async resumeSchedule(
+    request: ResumeScheduleRequest,
+  ): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.resume", request);
   }
 
   async cancelSchedule(scheduleId: string): Promise<PublicScheduleV1> {
