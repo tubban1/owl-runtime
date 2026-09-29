@@ -63,6 +63,8 @@ export {
   type PublicTaskStatusV1,
   type PublicTaskStepStateV1,
   type PublicExecutionRevisionRefV1,
+  type PublicExecutionActivationV1,
+  type PublicTaskProvenanceV1,
   type PublicObservationV1,
   type PublicVerificationReceiptV1,
   type PublicTaskStepV1,
