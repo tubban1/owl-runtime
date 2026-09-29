@@ -45,6 +45,8 @@ export type PersistentSchedule = {
   endAt?: string;
   runCount: number;
   nextRunAt: string | null;
+  pausedAt?: string;
+  pausedNextRunAt?: string;
   lastRunAt?: string;
   lastCompletedAt?: string;
   lastTaskId?: string;
