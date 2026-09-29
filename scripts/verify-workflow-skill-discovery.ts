@@ -31,6 +31,7 @@ const {
 } = await import("../src/skills/workflowSkillDiscovery.js");
 const {
   compileSkillCandidateTest,
+  dismissSkillCandidate,
   getSkillCandidates,
   inspectSkillCandidate,
   promoteSkillCandidate,
@@ -218,26 +219,58 @@ try {
   ]);
   assert.equal(submittedProposal.readyForSubmit, false);
 
+  const dismissed = (await dismissSkillCandidate({
+    candidateId: explicit.candidate.id,
+    expectedDigest: explicit.candidate.currentDigest,
+  })) as any;
+  assert.equal(dismissed.status, "dismissed");
+
+  const afterDismiss = (await discoverWorkflowSkillCandidates()) as any;
+  const dismissedProposal = afterDismiss.proposals[0];
+  assert.equal(dismissedProposal.proposalId, proposal.proposalId);
+  assert.equal(dismissedProposal.governance.state, "dismissed");
+  assert.deepEqual(dismissedProposal.governance.exactDismissedCandidateIds, [
+    explicit.candidate.id,
+  ]);
+  assert.equal(dismissedProposal.readyForSubmit, false);
+
   await createRepeatedRun(6);
-  const refreshedEvidence = (await discoverWorkflowSkillCandidates()) as any;
-  const refreshedProposal = refreshedEvidence.proposals[0];
+  const refreshedAfterDismiss =
+    (await discoverWorkflowSkillCandidates()) as any;
+  const refreshedProposal = refreshedAfterDismiss.proposals[0];
   assert.equal(refreshedProposal.proposalId, proposal.proposalId);
   assert.equal(refreshedProposal.support.successfulRuns, 4);
   assert.notEqual(refreshedProposal.manifestDigest, proposal.manifestDigest);
-  assert.equal(refreshedProposal.governance.state, "candidate_exists");
-  assert.equal(refreshedProposal.governance.evidenceRefreshAvailable, true);
-  assert.deepEqual(refreshedProposal.governance.exactDigestCandidateIds, []);
-  assert.equal(refreshedProposal.readyForSubmit, false);
+  assert.equal(refreshedProposal.governance.state, "new");
+  assert.equal(refreshedProposal.readyForSubmit, true);
+
+  const refreshedCandidate = (await submitSkillCandidate(
+    refreshedProposal.manifest,
+  )) as any;
+  assert.equal(refreshedCandidate.candidate.status, "active");
+  assert.notEqual(refreshedCandidate.candidate.id, explicit.candidate.id);
+
+  await createRepeatedRun(7);
+  const activeRefresh = (await discoverWorkflowSkillCandidates()) as any;
+  const activeRefreshProposal = activeRefresh.proposals[0];
+  assert.equal(activeRefreshProposal.proposalId, proposal.proposalId);
+  assert.equal(activeRefreshProposal.support.successfulRuns, 5);
+  assert.equal(activeRefreshProposal.governance.state, "candidate_exists");
+  assert.equal(
+    activeRefreshProposal.governance.evidenceRefreshAvailable,
+    true,
+  );
+  assert.equal(activeRefreshProposal.readyForSubmit, false);
 
   const validatedCandidate = (await validateSkillCandidate({
-    candidateId: explicit.candidate.id,
-    expectedDigest: explicit.candidate.currentDigest,
+    candidateId: refreshedCandidate.candidate.id,
+    expectedDigest: refreshedCandidate.candidate.currentDigest,
   })) as any;
   assert.equal(validatedCandidate.valid, true);
 
   const compiled = (await compileSkillCandidateTest({
-    candidateId: explicit.candidate.id,
-    expectedDigest: explicit.candidate.currentDigest,
+    candidateId: refreshedCandidate.candidate.id,
+    expectedDigest: refreshedCandidate.candidate.currentDigest,
     inputs: { step2_max_count: 5 },
   })) as any;
   const ranCandidate = await runPersistentTask(compiled.task.id, {
@@ -253,8 +286,8 @@ try {
   assert.equal(inspection.readiness.promotable, true);
 
   const promoted = (await promoteSkillCandidate({
-    candidateId: explicit.candidate.id,
-    expectedDigest: explicit.candidate.currentDigest,
+    candidateId: refreshedCandidate.candidate.id,
+    expectedDigest: refreshedCandidate.candidate.currentDigest,
     testTaskId: compiled.task.id,
     confirm: true,
   })) as any;
@@ -304,6 +337,8 @@ try {
         explicitCandidateSubmit: true,
         stableProposalIdentity: true,
         candidateGovernanceDedup: true,
+        dismissedDigestSuppressed: true,
+        refreshedProposalAfterDismissal: true,
         evidenceRefreshDetected: true,
         installedGovernanceDetected: true,
         promotionStillUsesGovernedPath: true,
