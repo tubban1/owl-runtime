@@ -87,3 +87,40 @@ export function assertExecutionRevisionDigest(
     throw error;
   }
 }
+
+
+export const EXECUTION_ACTIVATION_VERSION = 1 as const;
+
+export type ExecutionActivation = {
+  version: typeof EXECUTION_ACTIVATION_VERSION;
+  id: string;
+  revisionDigest: string;
+  testTaskId: string;
+  evidenceDigest: string;
+  activatedAt: string;
+};
+
+export function createExecutionActivation(input: {
+  revisionDigest: string;
+  testTaskId: string;
+  evidenceDigest: string;
+  activatedAt?: string;
+}): ExecutionActivation {
+  const id = "execact_" + createHash("sha256")
+    .update(JSON.stringify({
+      version: EXECUTION_ACTIVATION_VERSION,
+      revisionDigest: input.revisionDigest,
+      testTaskId: input.testTaskId,
+      evidenceDigest: input.evidenceDigest,
+    }))
+    .digest("hex")
+    .slice(0, 32);
+  return {
+    version: EXECUTION_ACTIVATION_VERSION,
+    id,
+    revisionDigest: input.revisionDigest,
+    testTaskId: input.testTaskId,
+    evidenceDigest: input.evidenceDigest,
+    activatedAt: input.activatedAt ?? new Date().toISOString(),
+  };
+}
