@@ -154,6 +154,8 @@ Important distinction:
 
 Discovery never revises an existing Candidate automatically when evidence refreshes.
 
+The regression also promotes a discovered Candidate through the normal governed test path and verifies that the same proposal subsequently reports `governance.state=installed`, with the active immutable Registry version visible to clients.
+
 ## Historical M2 evidence identity
 
 Important Runtime invariant:
