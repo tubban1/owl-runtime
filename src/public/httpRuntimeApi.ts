@@ -7,6 +7,9 @@ import { runtimeMode } from "../runtime/runtimePaths.js";
 import { withCancellationSignal } from "../runtime/cancellation.js";
 import { runtimeRequestCancellationRegistry } from "../runtime/requestCancellationRegistry.js";
 import {
+  withRuntimeRequestReplay,
+} from "../runtime/requestReplayStore.js";
+import {
   InProcessRuntimeClient,
   RUNTIME_PUBLIC_API_VERSION,
   type RuntimeClient,
@@ -20,6 +23,55 @@ import {
 } from "./runtimeRpc.js";
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:@/-]{3,200}$/;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:@/-]{1,200}$/;
+
+const READ_ONLY_RPC_METHODS = new Set<string>([
+  "info",
+  "capabilities.get",
+  "execution-targets.get",
+  "primitives.catalog",
+  "skills.catalog",
+  "skill-candidates.discover-workflows",
+  "skill-candidates.list",
+  "skill-candidates.get",
+  "user-skills.list",
+  "user-skills.get",
+  "tasks.list",
+  "tasks.get",
+  "schedules.list",
+  "schedules.get",
+  "approvals.list",
+  "approvals.get",
+  "health",
+  "events.list",
+  "diagnostics.get",
+]);
+
+function requestIdempotencyKey(req: Request): string | undefined {
+  const value = req.header("x-owl-idempotency-key")?.trim();
+  if (!value) return undefined;
+  if (!IDEMPOTENCY_KEY_PATTERN.test(value)) {
+    throw new Error(
+      "IDEMPOTENCY_KEY_INVALID: x-owl-idempotency-key must be 1-200 safe characters.",
+    );
+  }
+  return value;
+}
+
+function requiresConsequentialReplay(
+  method: string,
+  params: unknown,
+): boolean {
+  if (READ_ONLY_RPC_METHODS.has(method)) return false;
+  if (method !== "process") return true;
+  const object =
+    params && typeof params === "object" && !Array.isArray(params)
+      ? (params as Record<string, unknown>)
+      : {};
+  return !["list", "status", "observe", "wait"].includes(
+    typeof object.op === "string" ? object.op : "list",
+  );
+}
 
 const rpcRequestSchema = z.object({
   id: z.string().min(1).max(200).optional(),
@@ -148,6 +200,11 @@ export function registerRuntimeHttpApi(
 
       sessionId = logicalSessionId(req);
       const parsed = rpcRequestSchema.parse(req.body);
+      const idempotencyKey = requestIdempotencyKey(req);
+      const replayProtected = requiresConsequentialReplay(
+        parsed.method,
+        parsed.params,
+      );
       const active = runtimeRequestCancellationRegistry.begin({
         requestId,
         sessionId,
@@ -177,23 +234,61 @@ export function registerRuntimeHttpApi(
       });
 
       try {
-        const result = await withCancellationSignal(
+        const invoke = async () =>
+          await withExecutionContext(
+            {
+              sessionId: sessionId!,
+              requestId,
+              origin: "api",
+            },
+            async () =>
+              await invokeRuntimeRpc(
+                client,
+                parsed.method,
+                parsed.params,
+              ),
+          );
+
+        const replay = await withCancellationSignal(
           active.controller.signal,
-          async () =>
-            await withExecutionContext(
+          async () => {
+            if (!replayProtected || !idempotencyKey) {
+              return {
+                result: await invoke(),
+                replayed: false,
+                originalRequestId: requestId,
+              };
+            }
+            return await withRuntimeRequestReplay(
               {
                 sessionId: sessionId!,
+                idempotencyKey,
+                method: parsed.method,
+                params: parsed.params,
                 requestId,
-                origin: "api",
               },
-              async () =>
-                await invokeRuntimeRpc(
-                  client,
-                  parsed.method,
-                  parsed.params,
-                ),
-            ),
+              invoke,
+            );
+          },
         );
+        const result = replay.result;
+
+        if (replayProtected) {
+          res.setHeader(
+            "x-owl-idempotency-status",
+            idempotencyKey
+              ? replay.replayed
+                ? "replayed"
+                : "executed"
+              : "unprotected",
+          );
+          if (idempotencyKey) {
+            res.setHeader(
+              "x-owl-original-request-id",
+              replay.originalRequestId,
+            );
+          }
+        }
 
         requestFinished = true;
         res.json({
