@@ -546,11 +546,24 @@ export async function discoverWorkflowSkillCandidates(
     const exactDigestCandidateIds = matchingCandidates
       .filter((record) => record.exactDigest)
       .map((record) => record.candidateId);
+    const liveCandidates = matchingCandidates.filter(
+      (record) => record.status !== "dismissed",
+    );
+    const exactLiveCandidateIds = liveCandidates
+      .filter((record) => record.exactDigest)
+      .map((record) => record.candidateId);
+    const exactDismissedCandidateIds = matchingCandidates
+      .filter(
+        (record) => record.status === "dismissed" && record.exactDigest,
+      )
+      .map((record) => record.candidateId);
     const governanceState = registry
       ? "installed"
-      : matchingCandidates.length > 0
+      : liveCandidates.length > 0
         ? "candidate_exists"
-        : "new";
+        : exactDismissedCandidateIds.length > 0
+          ? "dismissed"
+          : "new";
 
     proposals.push({
       version: 1,
@@ -569,8 +582,10 @@ export async function discoverWorkflowSkillCandidates(
         state: governanceState,
         evidenceRefreshAvailable:
           governanceState === "candidate_exists" &&
-          exactDigestCandidateIds.length === 0,
+          exactLiveCandidateIds.length === 0,
         exactDigestCandidateIds,
+        exactLiveCandidateIds,
+        exactDismissedCandidateIds,
         candidates: matchingCandidates,
         installed: registry
           ? {
