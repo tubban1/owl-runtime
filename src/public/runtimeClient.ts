@@ -272,7 +272,7 @@ async function withPublicExecutionTarget<T>(
   );
 }
 
-export interface WorkflowSkillDiscoveryRuntimeClient {
+export interface WorkflowDiscoveryRuntimeClient {
   discoverWorkflowSkillCandidates(
     request?: WorkflowSkillDiscoveryRequest,
   ): Promise<unknown>;
@@ -299,6 +299,8 @@ export interface UserSkillRuntimeClient {
 }
 
 export type RuntimeClientWithUserSkills = RuntimeClient & UserSkillRuntimeClient;
+export type RuntimeClientWithWorkflowDiscovery =
+  RuntimeClientWithUserSkills & WorkflowDiscoveryRuntimeClient;
 
 export interface RuntimeClient {
   info(): Promise<RuntimeClientInfo>;
@@ -341,7 +343,7 @@ export interface RuntimeClient {
  * External products MUST depend on RuntimeClient semantics, not import Runtime
  * internals. IPC/HTTP implementations should preserve this interface.
  */
-export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowSkillDiscoveryRuntimeClient {
+export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient {
   async info(): Promise<RuntimeClientInfo> {
     return {
       apiVersion: RUNTIME_PUBLIC_API_VERSION,
