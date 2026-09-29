@@ -1,10 +1,11 @@
-name: 1.x User Skill Gate
+name: 1.x Integration Gate
 
 on:
   pull_request:
     branches:
       - platform/contracts-v1
       - feature/1.x-user-skill-registry
+      - feature/1.x-agent-request-events
 
 permissions:
   contents: read
