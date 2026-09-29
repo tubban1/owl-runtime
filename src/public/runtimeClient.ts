@@ -25,6 +25,11 @@ import {
   validateSkillCandidate,
 } from "../skills/userSkillRuntime.js";
 import {
+  discoverWorkflowSkillCandidates,
+  type WorkflowSkillDiscoveryRequest,
+} from "../skills/workflowSkillDiscovery.js";
+export type { WorkflowSkillDiscoveryRequest } from "../skills/workflowSkillDiscovery.js";
+import {
   cancelPersistentTask,
   createPersistentTask,
   deletePersistentTask,
@@ -267,6 +272,12 @@ async function withPublicExecutionTarget<T>(
   );
 }
 
+export interface WorkflowSkillDiscoveryRuntimeClient {
+  discoverWorkflowSkillCandidates(
+    request?: WorkflowSkillDiscoveryRequest,
+  ): Promise<unknown>;
+}
+
 export interface UserSkillRuntimeClient {
   submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown>;
   listSkillCandidates(): Promise<unknown>;
@@ -330,7 +341,7 @@ export interface RuntimeClient {
  * External products MUST depend on RuntimeClient semantics, not import Runtime
  * internals. IPC/HTTP implementations should preserve this interface.
  */
-export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient {
+export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowSkillDiscoveryRuntimeClient {
   async info(): Promise<RuntimeClientInfo> {
     return {
       apiVersion: RUNTIME_PUBLIC_API_VERSION,
@@ -378,6 +389,12 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
         ),
     );
   }
+  async discoverWorkflowSkillCandidates(
+    request: WorkflowSkillDiscoveryRequest = {},
+  ): Promise<unknown> {
+    return await discoverWorkflowSkillCandidates(request);
+  }
+
   async submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown> {
     return await submitSkillCandidate(request.manifest);
   }
