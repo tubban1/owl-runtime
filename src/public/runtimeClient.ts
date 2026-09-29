@@ -56,6 +56,7 @@ import {
   denyApproval,
   listApprovals,
   readApproval,
+  type ApprovalRecord,
 } from "../policy/approvalPolicy.js";
 import { RUNTIME_VERSION } from "../runtime/runtimeVersion.js";
 import { createSupportPackage } from "../diagnostics/supportPackage.js";
@@ -77,9 +78,27 @@ export type {
   RuntimeEventRetention,
 } from "../runtime/publicEventJournal.js";
 
+import type {
+  PublicApprovalActionResultV1,
+  PublicApprovalV1,
+  PublicDeleteReceiptV1,
+  PublicRunReceiptV1,
+  PublicScheduleV1,
+  PublicTaskDetailV1,
+  PublicTaskSummaryV1,
+} from "./runtimeDtos.js";
+
 export const RUNTIME_PUBLIC_API_VERSION = "0.1" as const;
 
 export type RuntimeTransport = "in-process" | "ipc" | "http" | "mock";
+
+function toPublicApproval(record: ApprovalRecord): PublicApprovalV1 {
+  return {
+    schemaVersion: 1,
+    ...record,
+  };
+}
+
 
 export type RuntimeClientInfo = {
   apiVersion: typeof RUNTIME_PUBLIC_API_VERSION;
@@ -348,27 +367,27 @@ export interface RuntimeClient {
   getSkillCatalog(): Promise<unknown>;
   runSkill(request: SkillRunRequest): Promise<unknown>;
 
-  createTask(request: CreateTaskRequest): Promise<unknown>;
+  createTask(request: CreateTaskRequest): Promise<PublicTaskDetailV1>;
   activateExecutionRevision(request: ActivateExecutionRevisionRequest): Promise<unknown>;
-  createTaskFromActivation(request: CreateTaskFromActivationRequest): Promise<unknown>;
-  listTasks(): Promise<unknown>;
-  getTask(taskId: string, includeResults?: boolean): Promise<unknown>;
-  runTask(request: RunTaskRequest): Promise<unknown>;
-  pauseTask(taskId: string): Promise<unknown>;
-  cancelTask(taskId: string): Promise<unknown>;
-  resolveTaskStep(request: ResolveTaskStepRequest): Promise<unknown>;
-  deleteTask(taskId: string): Promise<unknown>;
+  createTaskFromActivation(request: CreateTaskFromActivationRequest): Promise<PublicTaskDetailV1>;
+  listTasks(): Promise<PublicTaskSummaryV1[]>;
+  getTask(taskId: string, includeResults?: boolean): Promise<PublicTaskDetailV1>;
+  runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1>;
+  pauseTask(taskId: string): Promise<PublicTaskDetailV1>;
+  cancelTask(taskId: string): Promise<PublicTaskDetailV1>;
+  resolveTaskStep(request: ResolveTaskStepRequest): Promise<PublicTaskDetailV1>;
+  deleteTask(taskId: string): Promise<PublicDeleteReceiptV1>;
 
-  createSchedule(request: CreateScheduleRequest): Promise<unknown>;
-  listSchedules(): Promise<unknown>;
-  getSchedule(scheduleId: string): Promise<unknown>;
-  cancelSchedule(scheduleId: string): Promise<unknown>;
-  deleteSchedule(scheduleId: string): Promise<unknown>;
+  createSchedule(request: CreateScheduleRequest): Promise<PublicScheduleV1>;
+  listSchedules(): Promise<PublicScheduleV1[]>;
+  getSchedule(scheduleId: string): Promise<PublicScheduleV1>;
+  cancelSchedule(scheduleId: string): Promise<PublicScheduleV1>;
+  deleteSchedule(scheduleId: string): Promise<PublicDeleteReceiptV1>;
 
-  listApprovals(state?: ApprovalState): Promise<unknown>;
-  getApproval(approvalId: string): Promise<unknown>;
-  approve(approvalId: string, confirm: boolean): Promise<unknown>;
-  deny(approvalId: string, confirm: boolean): Promise<unknown>;
+  listApprovals(state?: ApprovalState): Promise<PublicApprovalV1[]>;
+  getApproval(approvalId: string): Promise<PublicApprovalV1>;
+  approve(approvalId: string, confirm: boolean): Promise<PublicApprovalActionResultV1>;
+  deny(approvalId: string, confirm: boolean): Promise<PublicApprovalActionResultV1>;
 
   process(request: ProcessRequest): Promise<unknown>;
   health(request?: HealthRequest): Promise<unknown>;
@@ -506,7 +525,7 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
     return await uninstallUserSkill(request);
   }
 
-  async createTask(request: CreateTaskRequest): Promise<unknown> {
+  async createTask(request: CreateTaskRequest): Promise<PublicTaskDetailV1> {
     return await withPublicExecutionTarget(
       request.executionTarget,
       async () =>
@@ -536,15 +555,15 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
     return await createPersistentTaskFromActivation(request);
   }
 
-  async listTasks(): Promise<unknown> {
+  async listTasks(): Promise<PublicTaskSummaryV1[]> {
     return await listPersistentTasks();
   }
 
-  async getTask(taskId: string, includeResults = false): Promise<unknown> {
+  async getTask(taskId: string, includeResults = false): Promise<PublicTaskDetailV1> {
     return await getPersistentTaskStatus(taskId, includeResults);
   }
 
-  async runTask(request: RunTaskRequest): Promise<unknown> {
+  async runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1> {
     return await runPersistentTask(request.taskId, {
       expectedRevisionDigest: request.expectedRevisionDigest,
       maxConcurrency: request.maxConcurrency,
@@ -554,15 +573,15 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
     });
   }
 
-  async pauseTask(taskId: string): Promise<unknown> {
+  async pauseTask(taskId: string): Promise<PublicTaskDetailV1> {
     return await requestTaskPause(taskId);
   }
 
-  async cancelTask(taskId: string): Promise<unknown> {
+  async cancelTask(taskId: string): Promise<PublicTaskDetailV1> {
     return await cancelPersistentTask(taskId);
   }
 
-  async resolveTaskStep(request: ResolveTaskStepRequest): Promise<unknown> {
+  async resolveTaskStep(request: ResolveTaskStepRequest): Promise<PublicTaskDetailV1> {
     return await resolvePersistentTaskStep(
       request.taskId,
       request.stepId,
@@ -571,11 +590,11 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
     );
   }
 
-  async deleteTask(taskId: string): Promise<unknown> {
+  async deleteTask(taskId: string): Promise<PublicDeleteReceiptV1> {
     return await deletePersistentTask(taskId);
   }
 
-  async createSchedule(request: CreateScheduleRequest): Promise<unknown> {
+  async createSchedule(request: CreateScheduleRequest): Promise<PublicScheduleV1> {
     return await withPublicExecutionTarget(
       request.executionTarget,
       async () =>
@@ -585,24 +604,24 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
     );
   }
 
-  async listSchedules(): Promise<unknown> {
+  async listSchedules(): Promise<PublicScheduleV1[]> {
     return await listPersistentSchedules();
   }
 
-  async getSchedule(scheduleId: string): Promise<unknown> {
+  async getSchedule(scheduleId: string): Promise<PublicScheduleV1> {
     return await getPersistentSchedule(scheduleId);
   }
 
-  async cancelSchedule(scheduleId: string): Promise<unknown> {
+  async cancelSchedule(scheduleId: string): Promise<PublicScheduleV1> {
     return await cancelPersistentSchedule(scheduleId);
   }
 
-  async deleteSchedule(scheduleId: string): Promise<unknown> {
+  async deleteSchedule(scheduleId: string): Promise<PublicDeleteReceiptV1> {
     return await deletePersistentSchedule(scheduleId);
   }
 
-  async listApprovals(state?: ApprovalState): Promise<unknown> {
-    return await listApprovals(
+  async listApprovals(state?: ApprovalState): Promise<PublicApprovalV1[]> {
+    const records = await listApprovals(
       state
         ? {
             state: state as Parameters<typeof listApprovals>[0] extends
@@ -613,34 +632,49 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
           }
         : undefined,
     );
+    return records.map(toPublicApproval);
   }
 
-  async getApproval(approvalId: string): Promise<unknown> {
-    return await readApproval(approvalId);
+  async getApproval(approvalId: string): Promise<PublicApprovalV1> {
+    return toPublicApproval(await readApproval(approvalId));
   }
 
-  async approve(approvalId: string, confirm: boolean): Promise<unknown> {
+  async approve(
+    approvalId: string,
+    confirm: boolean,
+  ): Promise<PublicApprovalActionResultV1> {
     const approval = await approveApproval(approvalId, confirm);
     if (!approval.ownerTaskId || !approval.ownerStepId) {
-      return { approval, resumed: null };
+      return { schemaVersion: 1, approval: toPublicApproval(approval), resume: null };
     }
     const resume = await resumePersistentTaskAfterApproval(
       approval.ownerTaskId,
       approval.id,
     );
-    return { approval, resume };
+    return {
+      schemaVersion: 1,
+      approval: toPublicApproval(approval),
+      resume: resume as Record<string, unknown>,
+    };
   }
 
-  async deny(approvalId: string, confirm: boolean): Promise<unknown> {
+  async deny(
+    approvalId: string,
+    confirm: boolean,
+  ): Promise<PublicApprovalActionResultV1> {
     const approval = await denyApproval(approvalId, confirm);
     if (!approval.ownerTaskId || !approval.ownerStepId) {
-      return { approval, task: null };
+      return { schemaVersion: 1, approval: toPublicApproval(approval), task: null };
     }
     const task = await failPersistentTaskAfterApprovalDenial(
       approval.ownerTaskId,
       approval.id,
     );
-    return { approval, task };
+    return {
+      schemaVersion: 1,
+      approval: toPublicApproval(approval),
+      task,
+    };
   }
 
   async process(request: ProcessRequest): Promise<unknown> {
