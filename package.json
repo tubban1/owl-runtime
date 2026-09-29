@@ -70,6 +70,7 @@
     "verify:execution-activation": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-activation.ts",
     "verify:approval-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-approval-resume.ts",
     "verify:public-dto": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-dto.ts",
+    "verify:storage-foundation": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-foundation.ts",
     "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts"
   },
   "dependencies": {
