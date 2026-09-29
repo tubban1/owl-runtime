@@ -346,10 +346,18 @@ Implementation is justified now because the missing layer is small and can reuse
 - User Skill execution through normal Persistent Tasks;
 - public RuntimeClient / HTTP RPC.
 
+### Implemented in Phase 2A follow-up
+
+- deterministic repeated verified-work grouping;
+- bounded scalar argument parameterization;
+- read-only draft manifest generation;
+- existing validator preview;
+- explicit exclusion of derived Skill/test Tasks;
+- embedded-secret rejection before Candidate promotion.
+
 ### Do not implement yet
 
-- automatic repeated-work clustering;
-- LLM-based Skill generation inside Runtime;
+- LLM/semantic clustering of loosely similar trajectories inside Runtime;
 - automatic Candidate revision;
 - automatic production activation;
 - arbitrary code plugins;
