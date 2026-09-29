@@ -175,6 +175,8 @@ function summarize(schedule: PersistentSchedule) {
     maxRuns: schedule.maxRuns ?? null,
     endAt: schedule.endAt ?? null,
     nextRunAt: schedule.nextRunAt,
+    pausedAt: schedule.pausedAt ?? null,
+    pausedNextRunAt: schedule.pausedNextRunAt ?? null,
     lastRunAt: schedule.lastRunAt ?? null,
     lastCompletedAt: schedule.lastCompletedAt ?? null,
     lastTaskId: schedule.lastTaskId ?? null,
@@ -538,10 +540,104 @@ export async function getPersistentSchedule(id: string) {
   return summarize(await readSchedule(id));
 }
 
+export type ScheduleResumeMissedRunPolicy = "skip" | "catch_up";
+
+export async function pausePersistentSchedule(id: string) {
+  if (activeSchedules.has(id)) {
+    throw new Error(
+      "SCHEDULE_PAUSE_ACTIVE_OCCURRENCE: wait for the current scheduler tick to settle before pausing.",
+    );
+  }
+  const schedule = await readSchedule(id);
+  if (schedule.pausedAt) {
+    return summarize(schedule);
+  }
+  if (schedule.activeTaskId) {
+    throw new Error(
+      "SCHEDULE_PAUSE_ACTIVE_TASK: the current occurrence must reach a terminal state before recurrence can be paused.",
+    );
+  }
+  if (!schedule.enabled) {
+    throw new Error(
+      "SCHEDULE_NOT_PAUSABLE: only an enabled recurring schedule can be paused.",
+    );
+  }
+
+  schedule.pausedAt = new Date().toISOString();
+  schedule.pausedNextRunAt = schedule.nextRunAt ?? undefined;
+  schedule.enabled = false;
+  schedule.nextRunAt = null;
+  schedule.stoppedReason = "Paused.";
+  await writeSchedule(schedule);
+  return summarize(schedule);
+}
+
+export async function resumePersistentSchedule(
+  id: string,
+  options: { missedRunPolicy?: ScheduleResumeMissedRunPolicy } = {},
+) {
+  if (activeSchedules.has(id)) {
+    throw new Error(
+      "SCHEDULE_RESUME_ACTIVE_OCCURRENCE: wait for the current scheduler tick to settle before resuming.",
+    );
+  }
+  const schedule = await readSchedule(id);
+  if (schedule.enabled && !schedule.pausedAt) {
+    return summarize(schedule);
+  }
+  if (!schedule.pausedAt) {
+    throw new Error(
+      "SCHEDULE_NOT_PAUSED: cancelled/completed schedules cannot be resumed through pause/resume.",
+    );
+  }
+  if (schedule.activeTaskId) {
+    throw new Error(
+      "SCHEDULE_RESUME_ACTIVE_TASK: reconcile the active occurrence before resuming recurrence.",
+    );
+  }
+
+  const policy = options.missedRunPolicy ?? "skip";
+  const now = Date.now();
+  const checkpoint = schedule.pausedNextRunAt
+    ? Date.parse(schedule.pausedNextRunAt)
+    : Number.NaN;
+  let nextRunAt: string | null = null;
+
+  if (Number.isFinite(checkpoint) && checkpoint > now) {
+    nextRunAt = new Date(checkpoint).toISOString();
+  } else if (policy === "catch_up") {
+    nextRunAt = new Date(now).toISOString();
+  } else {
+    nextRunAt = nextRunAfter(schedule.trigger, now);
+  }
+
+  if (!nextRunAt) {
+    throw new Error(
+      "SCHEDULE_RESUME_NO_FUTURE_OCCURRENCE: the paused one-time occurrence elapsed; use catch_up explicitly or create a new schedule.",
+    );
+  }
+  if (schedule.maxRuns && schedule.runCount >= schedule.maxRuns) {
+    throw new Error("SCHEDULE_RESUME_MAX_RUNS_REACHED");
+  }
+  if (schedule.endAt && Date.parse(nextRunAt) > Date.parse(schedule.endAt)) {
+    throw new Error("SCHEDULE_RESUME_END_REACHED");
+  }
+
+  schedule.enabled = true;
+  schedule.nextRunAt = nextRunAt;
+  schedule.pausedAt = undefined;
+  schedule.pausedNextRunAt = undefined;
+  schedule.stoppedReason = undefined;
+  await writeSchedule(schedule);
+  return summarize(schedule);
+}
+
 export async function cancelPersistentSchedule(id: string) {
   const schedule = await readSchedule(id);
   schedule.enabled = false;
   schedule.nextRunAt = null;
+  schedule.pausedAt = undefined;
+  schedule.pausedNextRunAt = undefined;
   schedule.stoppedReason = "Cancelled.";
   await writeSchedule(schedule);
   return summarize(schedule);
