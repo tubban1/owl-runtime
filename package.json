@@ -16,6 +16,7 @@
     "verify:isa": "OWL_RUNTIME_MODE=test tsx scripts/verify-primitive-isa.ts",
     "verify:skill-abi": "OWL_RUNTIME_MODE=test tsx scripts/verify-skill-abi.ts",
     "verify:user-skills": "OWL_RUNTIME_MODE=test tsx scripts/verify-user-skill-registry.ts",
+    "verify:workflow-discovery": "OWL_RUNTIME_MODE=test tsx scripts/verify-workflow-skill-discovery.ts",
     "verify:task-memory": "OWL_RUNTIME_MODE=test tsx scripts/verify-task-memory.ts",
     "verify:scheduler": "OWL_RUNTIME_MODE=test tsx scripts/verify-scheduler.ts",
     "verify:loop": "OWL_RUNTIME_MODE=test tsx scripts/verify-loop.ts",
