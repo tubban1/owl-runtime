@@ -63,6 +63,8 @@ extensions.workflowSkillDiscovery.version = 1
 
 Discovery is read-only: it returns draft manifests and validation previews but does not write the Candidate Store or promote a Skill.
 
+Each proposal also includes read-only governance annotations for matching Candidates/Registry versions. Clients can distinguish `new`, `candidate_exists`, and `installed`; a changed draft digest on the same proposal is reported as an evidence refresh rather than triggering automatic Candidate revision.
+
 See `WORKFLOW_SKILL_DISCOVERY_V1.md`.
 
 ## Candidate governance
