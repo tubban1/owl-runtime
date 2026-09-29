@@ -126,6 +126,19 @@ try {
   assert.equal(excludesDerived.proposals[0].support.successfulRuns, 3);
 
   const client = new InProcessRuntimeClient();
+  const capabilities = (await client.getCapabilities()) as any;
+  assert.equal(capabilities.extensions.userSkillRegistry.version, 1);
+  assert.equal(capabilities.extensions.workflowSkillDiscovery.version, 1);
+  assert.equal(
+    capabilities.extensions.workflowSkillDiscovery.clientInterface,
+    "WorkflowDiscoveryRuntimeClient",
+  );
+  assert.equal(
+    capabilities.extensions.workflowSkillDiscovery.writesCandidateStore,
+    false,
+  );
+  assert.equal(capabilities.extensions.workflowSkillDiscovery.autoPromotes, false);
+
   const viaClient = (await client.discoverWorkflowSkillCandidates()) as any;
   assert.equal(viaClient.proposalCount, 1);
 
@@ -136,6 +149,23 @@ try {
   )) as any;
   assert.equal(viaRpc.proposalCount, 1);
 
+  const phase1OnlyClient = Object.create(client) as any;
+  phase1OnlyClient.discoverWorkflowSkillCandidates = undefined;
+  const phase1List = (await invokeRuntimeRpc(
+    phase1OnlyClient,
+    "user-skills.list",
+  )) as any;
+  assert.ok(Array.isArray(phase1List.skills));
+  await assert.rejects(
+    () =>
+      invokeRuntimeRpc(
+        phase1OnlyClient,
+        "skill-candidates.discover-workflows",
+        {},
+      ),
+    /workflow-discovery extension is not implemented/,
+  );
+
   const explicit = (await submitSkillCandidate(proposal.manifest)) as any;
   assert.equal(explicit.candidate.status, "active");
   const candidatesAfter = (await getSkillCandidates()) as any[];
@@ -143,8 +173,8 @@ try {
 
   const secretManifest = structuredClone(proposal.manifest);
   secretManifest.id = "user.workflow.secret-regression";
-  secretManifest.steps[0].args.cwd =
-    "api_key=abcdefghijklmnopqrstuvwx12345678";
+  secretManifest.steps[0].args.api_key =
+    "abcdefghijklmnopqrstuvwx12345678";
   const secretDigest = userSkillDigest(secretManifest);
   const secretValidation = validateUserSkillManifest(
     "candidate_secret_regression",
@@ -169,6 +199,8 @@ try {
         historicalM2EvidenceBound: true,
         excludesDerivedSkillRuns: true,
         publicRuntimeApi: true,
+        capabilityFeatureDetection: true,
+        phase1ExtensionCompatibility: true,
         explicitCandidateSubmit: true,
         embeddedSecretBlocked: true,
       },
