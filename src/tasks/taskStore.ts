@@ -22,6 +22,7 @@ export type PersistentTaskStatus =
   | "pending"
   | "running"
   | "paused"
+  | "waiting_approval"
   | "blocked"
   | "failed"
   | "completed"
@@ -30,6 +31,7 @@ export type PersistentTaskStatus =
 export type PersistentStepState =
   | "pending"
   | "running"
+  | "waiting_approval"
   | "succeeded"
   | "failed"
   | "needs_review";
@@ -59,6 +61,9 @@ export interface PersistentTaskStep {
   verification?: VerificationReceipt;
   error?: string;
   recoveryNote?: string;
+  approvalId?: string;
+  approvalFingerprint?: string;
+  approvalRequestedAt?: string;
 }
 
 export interface PersistentTaskEvent {
