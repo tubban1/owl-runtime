@@ -8,6 +8,7 @@ on:
       - feature/1.x-tested-activation
       - feature/1.x-approval-resume
       - feature/1.x-typed-public-dto
+      - feature/1.x-schedule-pause-resume
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -69,6 +70,9 @@ jobs:
 
       - name: Verify Public DTO
         run: npm run verify:public-dto
+
+      - name: Verify Schedule Pause Resume
+        run: npm run verify:schedule-pause-resume
 
       - name: Build Public Types
         run: npm run build:types
