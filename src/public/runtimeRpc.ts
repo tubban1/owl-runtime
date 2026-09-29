@@ -9,7 +9,7 @@ import type {
   RunTaskRequest,
   RuntimeClient,
   UserSkillRuntimeClient,
-  WorkflowSkillDiscoveryRuntimeClient,
+  WorkflowDiscoveryRuntimeClient,
   WorkflowSkillDiscoveryRequest,
   SkillRunRequest,
   SkillCandidateSubmitRequest,
@@ -97,7 +97,7 @@ function optionalBoolean(object: JsonObject, key: string): boolean | undefined {
 function requireUserSkillRuntimeClient(
   client: RuntimeClient &
     Partial<UserSkillRuntimeClient> &
-    Partial<WorkflowSkillDiscoveryRuntimeClient>,
+    Partial<WorkflowDiscoveryRuntimeClient>,
 ): UserSkillRuntimeClient {
   const required: Array<keyof UserSkillRuntimeClient> = [
     "submitSkillCandidate",
@@ -128,15 +128,15 @@ function requireUserSkillRuntimeClient(
   return client as RuntimeClient & UserSkillRuntimeClient;
 }
 
-function requireWorkflowSkillDiscoveryRuntimeClient(
-  client: RuntimeClient & Partial<WorkflowSkillDiscoveryRuntimeClient>,
-): WorkflowSkillDiscoveryRuntimeClient {
+function requireWorkflowDiscoveryRuntimeClient(
+  client: RuntimeClient & Partial<WorkflowDiscoveryRuntimeClient>,
+): WorkflowDiscoveryRuntimeClient {
   if (typeof client.discoverWorkflowSkillCandidates !== "function") {
     throw new Error(
-      "RUNTIME_CAPABILITY_UNAVAILABLE: workflow-skill-discovery extension is not implemented by this RuntimeClient.",
+      "RUNTIME_CAPABILITY_UNAVAILABLE: workflow-discovery extension is not implemented by this RuntimeClient.",
     );
   }
-  return client as RuntimeClient & WorkflowSkillDiscoveryRuntimeClient;
+  return client as RuntimeClient & WorkflowDiscoveryRuntimeClient;
 }
 
 export async function invokeRuntimeRpc(
@@ -164,7 +164,7 @@ export async function invokeRuntimeRpc(
     case "skill.run":
       return await client.runSkill(object as SkillRunRequest);
     case "skill-candidates.discover-workflows":
-      return await requireWorkflowSkillDiscoveryRuntimeClient(client).discoverWorkflowSkillCandidates(
+      return await requireWorkflowDiscoveryRuntimeClient(client).discoverWorkflowSkillCandidates(
         object as WorkflowSkillDiscoveryRequest,
       );
     case "skill-candidates.submit":
