@@ -55,5 +55,8 @@ jobs:
       - name: Verify Public Event Journal
         run: npm run verify:public-events
 
+      - name: Verify Consequential Request Replay
+        run: npm run verify:request-replay
+
       - name: Build Public Types
         run: npm run build:types
