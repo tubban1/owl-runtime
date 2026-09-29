@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
   RUNTIME_PUBLIC_API_VERSION,
+  type ActivateExecutionRevisionRequest,
   type ApprovalState,
   type CreateScheduleRequest,
+  type CreateTaskFromActivationRequest,
   type CreateTaskRequest,
   type HealthRequest,
   type PrimitiveCallRequest,
@@ -290,6 +292,18 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
 
   async createTask(request: CreateTaskRequest): Promise<unknown> {
     return await this.rpc("tasks.create", request);
+  }
+
+  async activateExecutionRevision(
+    request: ActivateExecutionRevisionRequest,
+  ): Promise<unknown> {
+    return await this.rpc("execution-revisions.activate", request);
+  }
+
+  async createTaskFromActivation(
+    request: CreateTaskFromActivationRequest,
+  ): Promise<unknown> {
+    return await this.rpc("execution-revisions.create-task", request);
   }
 
   async listTasks(): Promise<unknown> {
