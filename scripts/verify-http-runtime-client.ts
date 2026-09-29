@@ -55,6 +55,72 @@ try {
   assert.equal(info.apiVersion, "0.1");
   assert.equal(info.transport, "http");
 
+  const capabilities = (await client.getCapabilities("idempotency")) as any;
+  assert.equal(capabilities.extensions.consequentialRequestReplay.version, 1);
+  assert.equal(
+    capabilities.extensions.consequentialRequestReplay.keyHeader,
+    "x-owl-idempotency-key",
+  );
+
+  const replayTaskRequest = {
+    label: "http idempotency task",
+    steps: [
+      {
+        id: "read",
+        action: "fs.read",
+        args: { path: path.join(scratch, "missing-ok.txt") },
+      },
+    ],
+  };
+  const replayTaskA = (await client.invoke(
+    "tasks.create",
+    replayTaskRequest,
+    {
+      requestId: "http-replay:first",
+      idempotencyKey: "http-task-create-1",
+    },
+  )) as any;
+  const replayTaskB = (await client.invoke(
+    "tasks.create",
+    replayTaskRequest,
+    {
+      requestId: "http-replay:retry",
+      idempotencyKey: "http-task-create-1",
+    },
+  )) as any;
+  assert.equal(replayTaskA.id, replayTaskB.id);
+
+  const replayTasks = (await client.listTasks()) as any[];
+  assert.equal(
+    replayTasks.filter((task) => task.label === "http idempotency task").length,
+    1,
+  );
+
+  await assert.rejects(
+    () =>
+      client.invoke(
+        "tasks.create",
+        { ...replayTaskRequest, label: "different request" },
+        {
+          requestId: "http-replay:conflict",
+          idempotencyKey: "http-task-create-1",
+        },
+      ),
+    (error: any) =>
+      error?.name === "RuntimeRpcError" &&
+      error?.code === "IDEMPOTENCY_KEY_CONFLICT",
+  );
+
+  const replayTaskOtherSession = (await otherClient.invoke(
+    "tasks.create",
+    replayTaskRequest,
+    {
+      requestId: "http-replay:other-session",
+      idempotencyKey: "http-task-create-1",
+    },
+  )) as any;
+  assert.notEqual(replayTaskOtherSession.id, replayTaskA.id);
+
   const filePath = path.join(scratch, "transport.txt");
   const write = (await client.callPrimitive({
     primitive: "fs.write",
@@ -185,12 +251,31 @@ try {
     fileObservationAndVerificationOverHttp: true,
     executionTargetManifestOverHttp: true,
     durablePublicEventsOverHttp: true,
+    consequentialReplayOverHttp: true,
+    replayKeyConflictFailClosed: true,
+    replayKeyScopedToLogicalSession: true,
     diagnosticsOverHttp: true,
     missingLogicalSessionRejected: true,
     productionBearerTokenRequired: true,
     callsObservedForSession: session?.totalCalls ?? 0,
   }, null, 2));
 } finally {
+  try {
+    const tasks = (await client.listTasks()) as any[];
+    for (const task of tasks) {
+      if (task.label === "http idempotency task") {
+        await client.deleteTask(task.id).catch(() => undefined);
+      }
+    }
+    const otherTasks = (await otherClient.listTasks()) as any[];
+    for (const task of otherTasks) {
+      if (task.label === "http idempotency task") {
+        await otherClient.deleteTask(task.id).catch(() => undefined);
+      }
+    }
+  } catch {
+    // Best-effort replay task cleanup.
+  }
   if (processId) {
     try {
       await client.callPrimitive({
