@@ -3632,6 +3632,21 @@ export async function getCapabilityManifest(goal = "") {
         deny: "approvals.deny",
         reconstructRequest: false,
       },
+      typedPublicDto: {
+        version: 1,
+        status: "candidate",
+        schemaVersion: 1,
+        surfaces: [
+          "task-summary",
+          "task-detail",
+          "run-receipt",
+          "observation",
+          "verification",
+          "approval",
+          "schedule",
+        ],
+        opaqueInternals: ["storage", "staging", "memory"],
+      },
     },
     architecture: {
       name: identity.productName,
