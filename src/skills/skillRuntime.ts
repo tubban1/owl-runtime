@@ -66,6 +66,7 @@ import {
 import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
 import { getExecutionTargetManifest } from "../runtime/executionTarget.js";
+import { getRuntimeRequestReplayManifest } from "../runtime/requestReplayStore.js";
 import { getObservationAbiManifest, type ObservationState } from "../observation/observationAbi.js";
 import {
   getVerifierAbiManifest,
@@ -3597,6 +3598,13 @@ export async function getCapabilityManifest(goal = "") {
         embeddedLlm: false,
         desktopInboxOwnedByRuntime: false,
       },
+      consequentialRequestReplay: {
+        ...getRuntimeRequestReplayManifest(),
+        status: "candidate",
+        transport: "http",
+        requestIdRole: "cancellation-attempt-identity",
+        idempotencyKeyRole: "logical-consequential-request-identity",
+      },
     },
     architecture: {
       name: identity.productName,
@@ -3655,6 +3663,8 @@ export async function getCapabilityManifest(goal = "") {
         "1.x candidate: encrypted durable global public journal with monotonic sequence, stable cursor, bounded retention and explicit retention-gap errors",
       agentRequestProducer:
         "1.x candidate: deterministic User Skill validation state → transactional outbox → AgentRequest public events; no embedded LLM",
+      consequentialRequestReplay:
+        "1.x candidate: logical-session-scoped idempotency key + canonical request digest + encrypted durable replay receipt; crash before terminal receipt fails closed as uncertain",
       globalEpisodicIndex: "v0.9.9 encrypted terminal-task experience index",
       hybridRecall:
         "v0.9.9 unified episodic + semantic lexical/vector recall",
