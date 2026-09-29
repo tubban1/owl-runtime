@@ -39,6 +39,7 @@ export {
   type PublicScheduleTrigger,
   type PublicScheduleStopWhen,
   type CreateScheduleRequest,
+  type ResumeScheduleRequest,
   type ApprovalState,
   type DiagnosticsRequest,
   type HealthRequest,
