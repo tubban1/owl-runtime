@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/1.x-integration-closure
+      - feature/1.x-execution-revision
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -53,6 +54,9 @@ jobs:
 
       - name: Verify Consequential Request Replay
         run: npm run verify:request-replay
+
+      - name: Verify Execution Revision
+        run: npm run verify:execution-revision
 
       - name: Build Public Types
         run: npm run build:types
