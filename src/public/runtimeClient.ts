@@ -31,8 +31,10 @@ import {
 } from "../skills/workflowSkillDiscovery.js";
 export type { WorkflowSkillDiscoveryRequest } from "../skills/workflowSkillDiscovery.js";
 import {
+  activatePersistentExecutionRevision,
   cancelPersistentTask,
   createPersistentTask,
+  createPersistentTaskFromActivation,
   deletePersistentTask,
   getPersistentTaskStatus,
   listPersistentTasks,
@@ -191,6 +193,17 @@ export type CreateTaskRequest = {
   executionTarget?: PublicExecutionTarget;
 };
 
+export type ActivateExecutionRevisionRequest = {
+  testTaskId: string;
+  expectedRevisionDigest: string;
+  confirm: boolean;
+};
+
+export type CreateTaskFromActivationRequest = {
+  testTaskId: string;
+  expectedRevisionDigest: string;
+};
+
 export type RunTaskRequest = {
   taskId: string;
   expectedRevisionDigest?: string;
@@ -334,6 +347,8 @@ export interface RuntimeClient {
   runSkill(request: SkillRunRequest): Promise<unknown>;
 
   createTask(request: CreateTaskRequest): Promise<unknown>;
+  activateExecutionRevision(request: ActivateExecutionRevisionRequest): Promise<unknown>;
+  createTaskFromActivation(request: CreateTaskFromActivationRequest): Promise<unknown>;
   listTasks(): Promise<unknown>;
   getTask(taskId: string, includeResults?: boolean): Promise<unknown>;
   runTask(request: RunTaskRequest): Promise<unknown>;
@@ -505,6 +520,18 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
           },
         ),
     );
+  }
+
+  async activateExecutionRevision(
+    request: ActivateExecutionRevisionRequest,
+  ): Promise<unknown> {
+    return await activatePersistentExecutionRevision(request);
+  }
+
+  async createTaskFromActivation(
+    request: CreateTaskFromActivationRequest,
+  ): Promise<unknown> {
+    return await createPersistentTaskFromActivation(request);
   }
 
   async listTasks(): Promise<unknown> {
