@@ -156,6 +156,7 @@ function resolveReferences(
 
 function summarizeTask(task: PersistentTask, includeResults = false) {
   return {
+    schemaVersion: 1 as const,
     id: task.id,
     label: task.label,
     status: task.status,
@@ -257,6 +258,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
         : null,
       observation: step.observation
         ? {
+            schemaVersion: 1 as const,
             id: step.observation.observationId,
             channel: step.observation.channel,
             provider: step.observation.provider,
@@ -266,6 +268,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
         : null,
       verification: step.verification
         ? {
+            schemaVersion: 1 as const,
             id: step.verification.verificationId,
             specId: step.verification.specId,
             status: step.verification.status,
@@ -673,6 +676,7 @@ export async function listPersistentTasks() {
   for (const task of tasks) recovered.push(await recoverInterruptedTask(task));
 
   return recovered.map((task) => ({
+    schemaVersion: 1 as const,
     id: task.id,
     label: task.label,
     status: task.status,
@@ -720,10 +724,11 @@ export async function deletePersistentTask(id: string) {
   await deletePersistentTaskRecord(id);
   controlSignals.delete(id);
   return {
+    schemaVersion: 1 as const,
     id,
     label: task.label,
     previousStatus: task.status,
-    deleted: true,
+    deleted: true as const,
     stagingPreserved: true,
     stagingRoot: task.stagingRoot ?? null,
     stagedArtifactCount: task.stagedArtifacts?.length ?? 0,
@@ -1643,6 +1648,7 @@ export async function runPersistentTask(
     await writePersistentTask(task);
 
     return {
+      schemaVersion: 1 as const,
       id: task.id,
       label: task.label,
       status: task.status,
