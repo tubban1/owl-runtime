@@ -130,6 +130,10 @@ try {
   assert.equal(proposal.support.distinctArgumentSets, 3);
   assert.equal(proposal.support.recoveryFreeRuns, 3);
   assert.equal(proposal.validation.valid, true);
+  assert.equal(proposal.governance.state, "new");
+  assert.deepEqual(proposal.governance.candidates, []);
+  assert.equal(proposal.governance.installed, null);
+  assert.equal(proposal.governance.evidenceRefreshAvailable, false);
   assert.equal(proposal.readyForSubmit, true);
   assert.equal(proposal.requiresExplicitSubmit, true);
   assert.equal(proposal.requiresTestBeforePromotion, true);
@@ -200,6 +204,27 @@ try {
   const candidatesAfter = (await getSkillCandidates()) as any[];
   assert.equal(candidatesAfter.length, 1);
 
+  const afterSubmit = (await discoverWorkflowSkillCandidates()) as any;
+  const submittedProposal = afterSubmit.proposals[0];
+  assert.equal(submittedProposal.proposalId, proposal.proposalId);
+  assert.equal(submittedProposal.governance.state, "candidate_exists");
+  assert.equal(submittedProposal.governance.evidenceRefreshAvailable, false);
+  assert.deepEqual(submittedProposal.governance.exactDigestCandidateIds, [
+    explicit.candidate.id,
+  ]);
+  assert.equal(submittedProposal.readyForSubmit, false);
+
+  await createRepeatedRun(6);
+  const refreshedEvidence = (await discoverWorkflowSkillCandidates()) as any;
+  const refreshedProposal = refreshedEvidence.proposals[0];
+  assert.equal(refreshedProposal.proposalId, proposal.proposalId);
+  assert.equal(refreshedProposal.support.successfulRuns, 4);
+  assert.notEqual(refreshedProposal.manifestDigest, proposal.manifestDigest);
+  assert.equal(refreshedProposal.governance.state, "candidate_exists");
+  assert.equal(refreshedProposal.governance.evidenceRefreshAvailable, true);
+  assert.deepEqual(refreshedProposal.governance.exactDigestCandidateIds, []);
+  assert.equal(refreshedProposal.readyForSubmit, false);
+
   const secretManifest = structuredClone(proposal.manifest);
   secretManifest.id = "user.workflow.secret-regression";
   secretManifest.steps[0].args.api_key =
@@ -233,6 +258,9 @@ try {
         capabilityFeatureDetection: true,
         phase1ExtensionCompatibility: true,
         explicitCandidateSubmit: true,
+        stableProposalIdentity: true,
+        candidateGovernanceDedup: true,
+        evidenceRefreshDetected: true,
         embeddedSecretBlocked: true,
       },
       null,
