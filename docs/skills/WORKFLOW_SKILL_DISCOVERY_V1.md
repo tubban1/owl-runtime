@@ -127,6 +127,33 @@ A proposal includes:
 
 Provenance in the draft manifest records the source Task and M2 episode ids.
 
+## Proposal identity and governance refresh
+
+The structural `proposalId` remains stable for the same normalized intent/Primitive graph even when later executions add more supporting evidence.
+
+Discovery also performs read-only Candidate/Registry lookup and annotates each proposal:
+
+```text
+governance.state = new | candidate_exists | installed
+governance.exactDigestCandidateIds
+governance.evidenceRefreshAvailable
+governance.candidates[]
+governance.installed
+```
+
+This lets Desktop/Worker treat later evidence as a refresh of the same workflow opportunity instead of repeatedly prompting for a brand-new Skill.
+
+Important distinction:
+
+- `proposalId` identifies the repeated workflow opportunity;
+- `manifestDigest` identifies the exact current draft and its current provenance;
+- `evidenceRefreshAvailable=true` means a Candidate already exists for the workflow, but newer evidence produced a different draft digest;
+- `governance.state=installed` means that Skill id already exists in the immutable Registry.
+
+`readyForSubmit` is true only when validation passes and governance state is `new`.
+
+Discovery never revises an existing Candidate automatically when evidence refreshes.
+
 ## Historical M2 evidence identity
 
 Important Runtime invariant:
