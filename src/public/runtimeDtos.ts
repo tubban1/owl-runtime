@@ -184,6 +184,33 @@ export type PublicScheduleV1 = {
   [key: string]: unknown;
 };
 
+export type PublicArtifactRetentionClassV1 =
+  | "cache"
+  | "task_staging"
+  | "intermediate"
+  | "log"
+  | "failed_debug"
+  | "observation_payload"
+  | "saved"
+  | "task_metadata"
+  | "audit";
+
+export type PublicArtifactRefV1 = {
+  schemaVersion: 1;
+  artifactId: string;
+  objectId: string;
+  digest: `sha256:${string}`;
+  mediaType: string;
+  sizeBytes: number;
+  createdAt: string;
+  retentionClass: PublicArtifactRetentionClassV1;
+  provenance?: {
+    taskId?: string;
+    executionRevisionId?: string;
+    evidenceId?: string;
+  };
+};
+
 export type PublicDeleteReceiptV1 = {
   schemaVersion: 1;
   id: string;
