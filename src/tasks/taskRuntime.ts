@@ -783,9 +783,16 @@ export async function createPersistentTaskFromActivation(input: {
   }
 
   const revision = testTask.executionRevision;
+  const activatedSteps: GraphStep[] = revision.canonical.steps.map((step) => ({
+    id: step.id,
+    action: step.action,
+    args: step.args,
+    dependsOn: step.dependsOn,
+    verify: step.verify as VerificationSpec | undefined,
+  }));
   return await createPersistentTask(
     revision.canonical.label,
-    revision.canonical.steps,
+    activatedSteps,
     {
       maxConcurrency: revision.canonical.maxConcurrency,
       failFast: revision.canonical.failFast,
