@@ -9,6 +9,8 @@ import type {
   RunTaskRequest,
   RuntimeClient,
   UserSkillRuntimeClient,
+  WorkflowSkillDiscoveryRuntimeClient,
+  WorkflowSkillDiscoveryRequest,
   SkillRunRequest,
   SkillCandidateSubmitRequest,
   SkillCandidateReviseRequest,
@@ -29,6 +31,7 @@ export const RUNTIME_RPC_METHODS = [
   "primitive.call",
   "skills.catalog",
   "skill.run",
+  "skill-candidates.discover-workflows",
   "skill-candidates.submit",
   "skill-candidates.list",
   "skill-candidates.get",
@@ -92,7 +95,9 @@ function optionalBoolean(object: JsonObject, key: string): boolean | undefined {
 }
 
 function requireUserSkillRuntimeClient(
-  client: RuntimeClient & Partial<UserSkillRuntimeClient>,
+  client: RuntimeClient &
+    Partial<UserSkillRuntimeClient> &
+    Partial<WorkflowSkillDiscoveryRuntimeClient>,
 ): UserSkillRuntimeClient {
   const required: Array<keyof UserSkillRuntimeClient> = [
     "submitSkillCandidate",
@@ -123,6 +128,17 @@ function requireUserSkillRuntimeClient(
   return client as RuntimeClient & UserSkillRuntimeClient;
 }
 
+function requireWorkflowSkillDiscoveryRuntimeClient(
+  client: RuntimeClient & Partial<WorkflowSkillDiscoveryRuntimeClient>,
+): WorkflowSkillDiscoveryRuntimeClient {
+  if (typeof client.discoverWorkflowSkillCandidates !== "function") {
+    throw new Error(
+      "RUNTIME_CAPABILITY_UNAVAILABLE: workflow-skill-discovery extension is not implemented by this RuntimeClient.",
+    );
+  }
+  return client as RuntimeClient & WorkflowSkillDiscoveryRuntimeClient;
+}
+
 export async function invokeRuntimeRpc(
   client: RuntimeClient & Partial<UserSkillRuntimeClient>,
   method: RuntimeRpcMethod,
@@ -147,6 +163,10 @@ export async function invokeRuntimeRpc(
       return await client.getSkillCatalog();
     case "skill.run":
       return await client.runSkill(object as SkillRunRequest);
+    case "skill-candidates.discover-workflows":
+      return await requireWorkflowSkillDiscoveryRuntimeClient(client).discoverWorkflowSkillCandidates(
+        object as WorkflowSkillDiscoveryRequest,
+      );
     case "skill-candidates.submit":
       return await requireUserSkillRuntimeClient(client).submitSkillCandidate(object as SkillCandidateSubmitRequest);
     case "skill-candidates.list":
