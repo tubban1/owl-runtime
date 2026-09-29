@@ -309,12 +309,14 @@ canonical transition cannot leak a public proposal.
 producer contract version
 subject kind
 subject id
+candidate revision
 candidate digest
 reason class
 ~~~
 
 The same canonical issue therefore receives the same proposal identity after
-retry/restart.
+retry/restart. A later Candidate revision is a distinct issue even if its
+manifest intentionally returns to an earlier digest.
 
 `dedupeKey` includes:
 
@@ -323,7 +325,7 @@ producer contract version
 subject kind
 subject id
 candidate revision
-candidate digest identity
+full candidate digest
 reason class
 ~~~
 
@@ -348,8 +350,13 @@ USER_SKILL_STEP_REFERENCE_UNKNOWN
 USER_SKILL_EMBEDDED_SECRET_BLOCKED
 ~~~
 
-The event includes only the selected machine-readable error codes and references
-the canonical validation report; it does not copy manifest/source content.
+The event includes only the selected machine-readable error codes. Its
+`contextRefs` points back to the canonical `skill_candidate` with the exact
+revision, which Desktop can dereference through the existing
+`skill-candidates.get` public API. Runtime does not emit a synthetic
+`validation_report` identifier that clients would have to parse or guess.
+
+The event does not copy manifest/source content.
 
 No AgentRequest is produced for normal schema errors, deterministic contract
 normalization, ordinary metadata mistakes, deterministic retries, Approval,

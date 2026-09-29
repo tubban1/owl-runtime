@@ -204,6 +204,7 @@ function candidateAgentRequestIdentity(record: SkillCandidateRecord) {
     AGENT_REQUEST_PRODUCER_CONTRACT_VERSION,
     "skill_candidate",
     record.id,
+    "r" + record.revision,
     record.currentDigest,
     reasonCode,
   ].join("|");
@@ -214,7 +215,7 @@ function candidateAgentRequestIdentity(record: SkillCandidateRecord) {
     "skill_candidate",
     record.id,
     "r" + record.revision,
-    record.currentDigest.slice(0, 12),
+    record.currentDigest,
     "validation_failed",
   ].join(":");
   return { proposalId, dedupeKey, reasonCode };
@@ -283,14 +284,9 @@ function proposedEventForValidation(
     errorCodes,
     contextRefs: [
       {
-        kind: "validation_report",
-        id:
-          "validation_" +
-          record.id +
-          "_r" +
-          record.revision +
-          "_" +
-          record.currentDigest.slice(0, 12),
+        kind: "skill_candidate",
+        id: record.id,
+        revision: String(record.revision),
       },
     ],
     allowedActions: [

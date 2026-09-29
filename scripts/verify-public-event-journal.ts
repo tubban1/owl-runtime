@@ -307,10 +307,17 @@ try {
       "^runtime:agent_request_v1:skill_candidate:" +
         candidateId +
         ":r1:" +
-        r1Digest.slice(0, 12) +
+        r1Digest +
         ":validation_failed$",
     ),
   );
+  assert.deepEqual(proposal1.contextRefs, [
+    {
+      kind: "skill_candidate",
+      id: candidateId,
+      revision: "1",
+    },
+  ]);
   assertSafeEventShape(proposal1);
 
   // Repeated validation is producer-idempotent.
@@ -402,10 +409,40 @@ try {
   assert.notEqual(proposal2.proposalId, proposal1.proposalId);
   assert.notEqual(proposal2.dedupeKey, proposal1.dedupeKey);
 
+  // A later revision may intentionally return to an earlier exact digest.
+  // Revision remains part of canonical issue identity, so this is still a new
+  // reasoning item rather than a replay of r1.
+  const reverted = (await reviseSkillCandidate({
+    candidateId,
+    expectedDigest: r2Digest,
+    manifest: semanticFailureManifest("1.0.0"),
+  })) as any;
+  assert.equal(reverted.candidate.revision, 3);
+  const r3Digest = reverted.candidate.currentDigest;
+  assert.equal(r3Digest, r1Digest);
+  await validateSkillCandidate({
+    candidateId,
+    expectedDigest: r3Digest,
+  });
+  const afterR3Validate = await client.listEvents({
+    afterCursor: "runtime-events:0",
+    limit: 100,
+  });
+  assert.deepEqual(
+    afterR3Validate.events.map((event) => event.sequence),
+    [1, 2, 3, 4, 5],
+  );
+  const proposal3 = afterR3Validate.events[4] as any;
+  assert.equal(proposal3.eventType, "agent_request.proposed");
+  assert.equal(proposal3.subject.revision, "3");
+  assert.equal(proposal3.subject.id, candidateId);
+  assert.notEqual(proposal3.proposalId, proposal1.proposalId);
+  assert.notEqual(proposal3.dedupeKey, proposal1.dedupeKey);
+
   // Replaying dismissal/withdrawal remains idempotent.
   await dismissSkillCandidate({
     candidateId,
-    expectedDigest: r2Digest,
+    expectedDigest: r3Digest,
   });
   const afterDismiss = await client.listEvents({
     afterCursor: "runtime-events:0",
@@ -413,15 +450,15 @@ try {
   });
   assert.deepEqual(
     afterDismiss.events.map((event) => event.sequence),
-    [1, 2, 3, 4],
+    [1, 2, 3, 4, 5, 6],
   );
   await dismissSkillCandidate({
     candidateId,
-    expectedDigest: r2Digest,
+    expectedDigest: r3Digest,
   });
   assert.equal(
     (await client.listEvents({ afterCursor: "runtime-events:0" })).events.length,
-    4,
+    6,
   );
 
   // Permission escalation is a deterministic policy rejection, not an LLM job.
@@ -442,7 +479,7 @@ try {
   );
   assert.equal(
     (await client.listEvents({ afterCursor: "runtime-events:0" })).events.length,
-    4,
+    6,
   );
 
   // Strict public schema rejects prompt/payload/secret/permission channels.
@@ -558,8 +595,8 @@ try {
   process.env.RUNTIME_PUBLIC_EVENT_KEY_PATH = path.join(scratch, "public-events.key");
   const canonical = (await getSkillCandidate(candidateId)) as any;
   assert.equal(canonical.status, "dismissed");
-  assert.equal(canonical.revision, 2);
-  assert.equal(canonical.currentDigest, r2Digest);
+  assert.equal(canonical.revision, 3);
+  assert.equal(canonical.currentDigest, r3Digest);
 
   console.log(
     JSON.stringify(
@@ -572,6 +609,8 @@ try {
         withdrawReplaySuppressed: true,
         staleRevisionRejected: true,
         revisionDigestIdentity: true,
+        revisionIdentitySurvivesDigestReversion: true,
+        contextRefsCanonicalAndDereferenceable: true,
         cursorExpirationExplicit: true,
         expiredEventIdKeepsOriginalSequence: true,
         journalCorruptionFailClosed: true,
