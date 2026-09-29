@@ -193,6 +193,7 @@ export type CreateTaskRequest = {
 
 export type RunTaskRequest = {
   taskId: string;
+  expectedRevisionDigest?: string;
   maxConcurrency?: number;
   failFast?: boolean;
   maxWaves?: number;
@@ -516,6 +517,7 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
 
   async runTask(request: RunTaskRequest): Promise<unknown> {
     return await runPersistentTask(request.taskId, {
+      expectedRevisionDigest: request.expectedRevisionDigest,
       maxConcurrency: request.maxConcurrency,
       failFast: request.failFast,
       maxWaves: request.maxWaves,
