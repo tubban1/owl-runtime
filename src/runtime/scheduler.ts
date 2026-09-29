@@ -164,9 +164,12 @@ function stopConditionMatched(
 
 function summarize(schedule: PersistentSchedule) {
   return {
+    schemaVersion: 1 as const,
     id: schedule.id,
     label: schedule.label,
     enabled: schedule.enabled,
+    createdAt: schedule.createdAt,
+    updatedAt: schedule.updatedAt,
     trigger: schedule.trigger,
     runCount: schedule.runCount,
     maxRuns: schedule.maxRuns ?? null,
@@ -551,8 +554,9 @@ export async function deletePersistentSchedule(id: string) {
   const schedule = await readSchedule(id);
   await deleteScheduleRecord(id);
   return {
+    schemaVersion: 1 as const,
     id,
-    deleted: true,
+    deleted: true as const,
     lastTaskId: schedule.lastTaskId ?? null,
   };
 }
