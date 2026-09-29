@@ -27,6 +27,7 @@ const {
 } = await import("../src/tasks/taskRuntime.js");
 const {
   discoverWorkflowSkillCandidates,
+  workflowDiscoveryParameterName,
 } = await import("../src/skills/workflowSkillDiscovery.js");
 const {
   getSkillCandidates,
@@ -83,6 +84,26 @@ async function createRepeatedRun(index: number, derived = false) {
 
 try {
   await fs.rm(scratch, { recursive: true, force: true });
+
+  assert.equal(
+    workflowDiscoveryParameterName("step2", ["max_count"]),
+    "step2_max_count",
+  );
+  assert.notEqual(
+    workflowDiscoveryParameterName("step1", ["a-b"]),
+    workflowDiscoveryParameterName("step1", ["a_b"]),
+  );
+  const longA = workflowDiscoveryParameterName(
+    "step1",
+    ["x".repeat(90) + "a"],
+  );
+  const longB = workflowDiscoveryParameterName(
+    "step1",
+    ["x".repeat(90) + "b"],
+  );
+  assert.ok(longA.length <= 64);
+  assert.ok(longB.length <= 64);
+  assert.notEqual(longA, longB);
 
   await createRepeatedRun(1);
   await createRepeatedRun(2);
@@ -196,6 +217,7 @@ try {
         proposalReadOnly: true,
         normalizedStepIds: true,
         scalarParameterization: true,
+        collisionSafeParameterNames: true,
         historicalM2EvidenceBound: true,
         excludesDerivedSkillRuns: true,
         publicRuntimeApi: true,
