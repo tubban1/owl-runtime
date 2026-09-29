@@ -35,6 +35,36 @@ UserSkillRuntimeClient
 
 This avoids turning an additive 1.x feature into a source-breaking requirement for every existing RuntimeClient mock.
 
+## Workflow discovery extension
+
+Repeated-work discovery is a separate additive client extension:
+
+```text
+WorkflowSkillDiscoveryRuntimeClient
+```
+
+Public method:
+
+```text
+discoverWorkflowSkillCandidates
+```
+
+HTTP RPC:
+
+```text
+skill-candidates.discover-workflows
+```
+
+Feature detection:
+
+```text
+extensions.userSkillRegistry.workflowDiscovery.version = 1
+```
+
+Discovery is read-only: it returns draft manifests and validation previews but does not write the Candidate Store or promote a Skill.
+
+See `WORKFLOW_SKILL_DISCOVERY_V1.md`.
+
 ## Candidate governance
 
 Public methods:
