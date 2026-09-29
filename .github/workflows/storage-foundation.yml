@@ -1,0 +1,49 @@
+name: 1.x Storage Foundation Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-storage-foundation
+  pull_request:
+    branches:
+      - feature/1.x-schedule-pause-resume
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-foundation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  storage-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify Storage Foundation
+        run: npm run verify:storage-foundation
+
+      - name: Verify Public DTO
+        run: npm run verify:public-dto
+
+      - name: Verify Schedule Pause Resume
+        run: npm run verify:schedule-pause-resume
+
+      - name: Build Public Types
+        run: npm run build:types
