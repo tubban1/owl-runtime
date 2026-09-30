@@ -43,6 +43,7 @@ jobs:
       - run: npm run verify:storage-metadata-sqlite
       - run: npm run verify:storage-key-provider
       - run: npm run verify:encrypted-metadata-store
+      - run: npm run verify:soak-contention-regression
       - run: npm run verify:public-runtime-client
       - run: npm run verify:http-runtime-client
       - run: npm run build:types

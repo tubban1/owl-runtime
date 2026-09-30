@@ -566,7 +566,13 @@ try {
       await withExecutionContext(sessionA, async () =>
         await ensureWorkspaceWriteLease(sharedRepo, {
           purpose: `${runId} contention ${iteration}`,
-          ttlMs: 10_000,
+          // This assertion is about conflicting ownership, not lease expiry.
+          // A 10s TTL made the 24h soak nondeterministic across macOS sleep or
+          // scheduler stalls: on wake the lease could legitimately expire
+          // before session B's immediately-following write assertion. Keep the
+          // lease valid for the maximum soak window and release it explicitly
+          // in finally below.
+          ttlMs: 24 * 60 * 60_000,
         }),
       );
       try {

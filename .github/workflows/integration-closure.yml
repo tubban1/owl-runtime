@@ -100,5 +100,8 @@ jobs:
       - name: Verify Encrypted Metadata Store
         run: npm run verify:encrypted-metadata-store
 
+      - name: Verify Soak Contention Regression
+        run: npm run verify:soak-contention-regression
+
       - name: Build Public Types
         run: npm run build:types
