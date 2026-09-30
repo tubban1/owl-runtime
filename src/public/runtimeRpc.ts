@@ -13,6 +13,10 @@ import type {
   RuntimeClient,
   RuntimeEventRuntimeClient,
   RuntimeEventListRequest,
+  StorageRuntimeClient,
+  StorageGarbageCollectionRequest,
+  StorageArtifactRequest,
+  LegacyStorageMigrationRequest,
   UserSkillRuntimeClient,
   WorkflowDiscoveryRuntimeClient,
   WorkflowSkillDiscoveryRequest,
@@ -77,6 +81,15 @@ export const RUNTIME_RPC_METHODS = [
   "process",
   "health",
   "events.list",
+  "storage.status",
+  "storage.artifacts.list",
+  "storage.reconcile",
+  "storage.retention.evaluate",
+  "storage.gc",
+  "storage.artifacts.pin",
+  "storage.artifacts.unpin",
+  "storage.legacy.inventory",
+  "storage.legacy.migrate",
   "diagnostics.get",
 ] as const;
 
@@ -147,6 +160,29 @@ function requireRuntimeEventRuntimeClient(
   return client as RuntimeClient & RuntimeEventRuntimeClient;
 }
 
+function requireStorageRuntimeClient(
+  client: RuntimeClient & Partial<StorageRuntimeClient>,
+): StorageRuntimeClient {
+  const required: Array<keyof StorageRuntimeClient> = [
+    "getStorageStatus",
+    "listStorageArtifacts",
+    "reconcileStorage",
+    "evaluateStorageRetention",
+    "collectStorageGarbage",
+    "pinStorageArtifact",
+    "unpinStorageArtifact",
+    "inventoryLegacyStorage",
+    "migrateLegacyStorage",
+  ];
+  const missing = required.filter((method) => typeof client[method] !== "function");
+  if (missing.length > 0) {
+    throw new Error(
+      "RUNTIME_CAPABILITY_UNAVAILABLE: storage-management extension is not implemented by this RuntimeClient.",
+    );
+  }
+  return client as RuntimeClient & StorageRuntimeClient;
+}
+
 function requireWorkflowDiscoveryRuntimeClient(
   client: RuntimeClient & Partial<WorkflowDiscoveryRuntimeClient>,
 ): WorkflowDiscoveryRuntimeClient {
@@ -162,7 +198,8 @@ export async function invokeRuntimeRpc(
   client: RuntimeClient &
     Partial<UserSkillRuntimeClient> &
     Partial<WorkflowDiscoveryRuntimeClient> &
-    Partial<RuntimeEventRuntimeClient>,
+    Partial<RuntimeEventRuntimeClient> &
+    Partial<StorageRuntimeClient>,
   method: RuntimeRpcMethod,
   params?: unknown,
 ): Promise<unknown> {
@@ -291,6 +328,32 @@ export async function invokeRuntimeRpc(
     case "events.list":
       return await requireRuntimeEventRuntimeClient(client).listEvents(
         object as RuntimeEventListRequest,
+      );
+    case "storage.status":
+      return await requireStorageRuntimeClient(client).getStorageStatus();
+    case "storage.artifacts.list":
+      return await requireStorageRuntimeClient(client).listStorageArtifacts();
+    case "storage.reconcile":
+      return await requireStorageRuntimeClient(client).reconcileStorage();
+    case "storage.retention.evaluate":
+      return await requireStorageRuntimeClient(client).evaluateStorageRetention();
+    case "storage.gc":
+      return await requireStorageRuntimeClient(client).collectStorageGarbage(
+        object as StorageGarbageCollectionRequest,
+      );
+    case "storage.artifacts.pin":
+      return await requireStorageRuntimeClient(client).pinStorageArtifact(
+        object as StorageArtifactRequest,
+      );
+    case "storage.artifacts.unpin":
+      return await requireStorageRuntimeClient(client).unpinStorageArtifact(
+        object as StorageArtifactRequest,
+      );
+    case "storage.legacy.inventory":
+      return await requireStorageRuntimeClient(client).inventoryLegacyStorage();
+    case "storage.legacy.migrate":
+      return await requireStorageRuntimeClient(client).migrateLegacyStorage(
+        object as LegacyStorageMigrationRequest,
       );
     case "diagnostics.get":
       return await client.getDiagnostics(object);
