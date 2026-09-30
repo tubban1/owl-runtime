@@ -335,5 +335,7 @@ S8 Desktop Storage contract
 S9 migration/integration tests  
 S10 SQLite MetadataStore authority + legacy JSON import  
 S11 Runtime storage/public contract freeze
+S12 SQLCipher production MetadataStore + Keychain key authority + encrypted migration/conformance
+S13 Desktop Storage Manager product integration (OWL Desktop 1.0)
 
-Only after S1–S11 and Runtime public-contract freeze may Desktop Storage Manager become a mutable product implementation target.
+S13 starts only after S12 is green on the exact Runtime integration SHA. Desktop 1.0 release is not storage-management complete until its Storage Manager consumer passes the Runtime contract/E2E gate. The Desktop UI may perform user-visible delete/cleanup actions only by requesting Runtime dry-run/confirmed GC; it never directly unlinks Runtime-owned storage or mutates `owl.db`.
