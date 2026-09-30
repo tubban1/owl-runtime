@@ -115,17 +115,11 @@ export async function collectPublicStorageGarbage(request: {
 }
 
 export async function pinPublicStorageArtifact(artifactId: string) {
-  return {
-    schemaVersion: 1 as const,
-    ...publicReference(await pinArtifactReference(artifactId)),
-  };
+  return publicReference(await pinArtifactReference(artifactId));
 }
 
 export async function unpinPublicStorageArtifact(artifactId: string) {
-  return {
-    schemaVersion: 1 as const,
-    ...publicReference(await unpinArtifactReference(artifactId)),
-  };
+  return publicReference(await unpinArtifactReference(artifactId));
 }
 
 export async function inventoryPublicLegacyStorage(): Promise<LegacyStorageInventory> {
