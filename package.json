@@ -89,7 +89,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
-    "better-sqlite3-multiple-ciphers": "^13.0.3",
+    "better-sqlite3-multiple-ciphers": "12.11.1",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "playwright-core": "^1.63.0",
