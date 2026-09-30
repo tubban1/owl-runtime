@@ -16,6 +16,9 @@ import {
   reconcileStorage,
   type StorageReconciliationReport,
 } from "./storageReconciliation.js";
+import {
+  STORAGE_METADATA_SCHEMA_VERSION,
+} from "./storageMetadataStore.js";
 
 function publicReference(reference: StorageReference) {
   return {
@@ -56,6 +59,13 @@ export async function getStorageRuntimeStatus() {
     foundationVersion: 1 as const,
     retentionVersion: 1 as const,
     reconciliationVersion: reconciliation.version,
+    metadataStore: {
+      provider: "sqlite" as const,
+      schemaVersion: STORAGE_METADATA_SCHEMA_VERSION,
+      database: "state/owl.db" as const,
+      absolutePathExposed: false as const,
+      secretsStoredHere: false as const,
+    },
     health: reconciliation.health,
     usage: {
       logicalReferenceCount: live.length,
