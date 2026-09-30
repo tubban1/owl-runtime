@@ -73,6 +73,7 @@
     "verify:storage-foundation": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-foundation.ts",
     "verify:storage-retention": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-retention.ts",
     "verify:legacy-storage-migration": "OWL_RUNTIME_MODE=test tsx scripts/verify-legacy-storage-migration.ts",
+    "verify:runtime-integration-freeze": "OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-integration-freeze.ts",
     "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts"
   },
   "dependencies": {
