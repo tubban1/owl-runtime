@@ -12,6 +12,7 @@ on:
       - feature/1.x-storage-foundation
       - feature/1.x-storage-retention-gc
       - feature/1.x-storage-legacy-migration
+      - feature/1.x-runtime-integration-freeze
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -85,6 +86,9 @@ jobs:
 
       - name: Verify Legacy Storage Migration
         run: npm run verify:legacy-storage-migration
+
+      - name: Verify Runtime Integration Freeze
+        run: npm run verify:runtime-integration-freeze
 
       - name: Build Public Types
         run: npm run build:types
