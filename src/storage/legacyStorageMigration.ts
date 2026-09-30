@@ -267,12 +267,16 @@ export async function inventoryLegacyStorage(
     for (const { fullPath, stat } of sourceFiles) {
       const relativePath = safeRelative(root, fullPath);
       const classification = classifyLegacyPath(relativePath);
-      sourceBytes += stat.size;
+      const sizeBytes = Number(stat.size);
+      if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+        throw new Error("LEGACY_STORAGE_SIZE_INVALID: file size is outside safe integer range.");
+      }
+      sourceBytes += sizeBytes;
       items.push({
         version: 1,
         source,
         relativePath,
-        sizeBytes: stat.size,
+        sizeBytes,
         modifiedAt: stat.mtime.toISOString(),
         inferredType: classification.inferredType,
         digest: await sha256File(fullPath),
