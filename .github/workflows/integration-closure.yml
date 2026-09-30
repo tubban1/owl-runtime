@@ -11,6 +11,7 @@ on:
       - feature/1.x-schedule-pause-resume
       - feature/1.x-storage-foundation
       - feature/1.x-storage-retention-gc
+      - feature/1.x-storage-legacy-migration
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -81,6 +82,9 @@ jobs:
 
       - name: Verify Storage Retention
         run: npm run verify:storage-retention
+
+      - name: Verify Legacy Storage Migration
+        run: npm run verify:legacy-storage-migration
 
       - name: Build Public Types
         run: npm run build:types
