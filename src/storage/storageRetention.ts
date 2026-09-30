@@ -1,14 +1,20 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import path from "node:path";
 import {
   artifactObjectPath,
-  ensureStorageLayout,
   owlLabDataRoot,
   verifyArtifactObject,
   type ArtifactRef,
   type RetentionClass,
 } from "./storageFoundation.js";
+import {
+  getObjectRow,
+  getReferenceRow,
+  listReferenceRows,
+  putObjectRow,
+  putReferenceRow,
+  withStorageMetadata,
+  type StorageObjectRecord,
+} from "./storageMetadataStore.js";
 
 export const STORAGE_REFERENCE_INDEX_VERSION = 1 as const;
 
@@ -35,14 +41,6 @@ export type StorageReference = {
   holdReason: string | null;
 };
 
-type StorageReferenceIndex = {
-  format: "owl-lab-storage-reference-index";
-  version: 1;
-  createdAt: string;
-  updatedAt: string;
-  references: StorageReference[];
-};
-
 export type RetentionEvaluation = {
   evaluatedAt: string;
   changed: number;
@@ -59,8 +57,6 @@ export type GarbageCollectionReceipt = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const LOCK_TIMEOUT_MS = 5_000;
-const LOCK_STALE_MS = 30_000;
 
 export const DEFAULT_RETENTION_MS: Readonly<Record<RetentionClass, number | null>> = {
   cache: 7 * DAY_MS,
@@ -73,14 +69,6 @@ export const DEFAULT_RETENTION_MS: Readonly<Record<RetentionClass, number | null
   task_metadata: null,
   audit: null,
 };
-
-function indexPath(root: string): string {
-  return path.join(root, "state", "storage-references.json");
-}
-
-function lockPath(root: string): string {
-  return path.join(root, "state", ".storage-references.lock");
-}
 
 function nowIso(now = Date.now()): string {
   return new Date(now).toISOString();
@@ -95,119 +83,37 @@ function expirationFor(
   return new Date(createdAtMs + ttl).toISOString();
 }
 
-function emptyIndex(now = Date.now()): StorageReferenceIndex {
-  const at = nowIso(now);
-  return {
-    format: "owl-lab-storage-reference-index",
-    version: STORAGE_REFERENCE_INDEX_VERSION,
-    createdAt: at,
-    updatedAt: at,
-    references: [],
-  };
+function cloneReference(reference: StorageReference): StorageReference {
+  return JSON.parse(JSON.stringify(reference)) as StorageReference;
 }
 
-function validateIndex(index: StorageReferenceIndex): StorageReferenceIndex {
-  if (
-    !index ||
-    index.format !== "owl-lab-storage-reference-index" ||
-    index.version !== STORAGE_REFERENCE_INDEX_VERSION ||
-    !Array.isArray(index.references)
-  ) {
-    throw new Error("STORAGE_REFERENCE_INDEX_INVALID: unsupported reference index.");
-  }
-  return index;
-}
-
-async function readIndex(root: string): Promise<StorageReferenceIndex> {
-  await ensureStorageLayout(root);
+async function transaction<T>(
+  db: Parameters<Parameters<typeof withStorageMetadata>[0]>[0],
+  operation: () => Promise<T> | T,
+): Promise<T> {
+  db.exec("BEGIN IMMEDIATE");
   try {
-    return validateIndex(
-      JSON.parse(await fs.readFile(indexPath(root), "utf8")) as StorageReferenceIndex,
-    );
+    const result = await operation();
+    db.exec("COMMIT");
+    return result;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyIndex();
+    db.exec("ROLLBACK");
     throw error;
   }
 }
 
-async function atomicWriteIndex(
-  root: string,
-  index: StorageReferenceIndex,
-): Promise<void> {
-  const target = indexPath(root);
-  const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(index, null, 2) + "\n", {
-    encoding: "utf8",
-    mode: 0o600,
-    flag: "wx",
-  });
-  try {
-    await fs.rename(temp, target);
-    await fs.chmod(target, 0o600).catch(() => undefined);
-  } finally {
-    await fs.rm(temp, { force: true }).catch(() => undefined);
+function assertObjectCompatible(
+  object: StorageObjectRecord,
+  artifact: ArtifactRef,
+): void {
+  if (
+    object.digest !== artifact.digest ||
+    object.sizeBytes !== artifact.sizeBytes
+  ) {
+    throw new Error(
+      "STORAGE_OBJECT_IDENTITY_CONFLICT: object metadata does not match ArtifactRef.",
+    );
   }
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function acquireIndexLock(root: string): Promise<() => Promise<void>> {
-  await ensureStorageLayout(root);
-  const lock = lockPath(root);
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-
-  while (true) {
-    try {
-      const handle = await fs.open(lock, "wx", 0o600);
-      await handle.writeFile(
-        JSON.stringify({ pid: process.pid, createdAt: nowIso() }) + "\n",
-      );
-      await handle.close();
-      return async () => {
-        await fs.rm(lock, { force: true }).catch(() => undefined);
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-
-      try {
-        const stat = await fs.stat(lock);
-        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          await fs.rm(lock, { force: true });
-          continue;
-        }
-      } catch (statError) {
-        if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw statError;
-      }
-
-      if (Date.now() >= deadline) {
-        throw new Error("STORAGE_REFERENCE_LOCK_TIMEOUT: reference index is busy.");
-      }
-      await sleep(25);
-    }
-  }
-}
-
-async function mutateIndex<T>(
-  root: string,
-  mutation: (index: StorageReferenceIndex) => Promise<T> | T,
-): Promise<T> {
-  const release = await acquireIndexLock(root);
-  try {
-    const index = await readIndex(root);
-    const result = await mutation(index);
-    index.updatedAt = nowIso();
-    await atomicWriteIndex(root, index);
-    return result;
-  } finally {
-    await release();
-  }
-}
-
-function cloneReference(reference: StorageReference): StorageReference {
-  return JSON.parse(JSON.stringify(reference)) as StorageReference;
 }
 
 export async function registerArtifactReference(
@@ -215,70 +121,92 @@ export async function registerArtifactReference(
   options: { root?: string; expiresAt?: string | null } = {},
 ): Promise<StorageReference> {
   const root = options.root ?? owlLabDataRoot();
-  return await mutateIndex(root, async (index) => {
-    await verifyArtifactObject(artifact, root);
-    const existing = index.references.find(
-      (reference) => reference.artifact.artifactId === artifact.artifactId,
-    );
-    if (existing) {
-      if (
-        existing.artifact.objectId !== artifact.objectId ||
-        existing.artifact.digest !== artifact.digest
-      ) {
+  return await withStorageMetadata(async (db) =>
+    await transaction(db, async () => {
+      await verifyArtifactObject(artifact, root);
+
+      const existing = getReferenceRow(db, artifact.artifactId);
+      if (existing) {
+        if (
+          existing.artifact.objectId !== artifact.objectId ||
+          existing.artifact.digest !== artifact.digest
+        ) {
+          throw new Error(
+            "STORAGE_REFERENCE_IDENTITY_CONFLICT: artifactId already binds another object.",
+          );
+        }
+        return cloneReference(existing);
+      }
+
+      const object = getObjectRow(db, artifact.objectId);
+      if (object?.state === "GC_PENDING") {
         throw new Error(
-          "STORAGE_REFERENCE_IDENTITY_CONFLICT: artifactId already binds another object.",
+          "STORAGE_OBJECT_GC_PENDING: object is being garbage-collected; retry registration.",
         );
       }
-      return cloneReference(existing);
-    }
+      if (object) assertObjectCompatible(object, artifact);
 
-    const at = nowIso();
-    const reference: StorageReference = {
-      version: 1,
-      artifact: { ...artifact },
-      lifecycle: "ACTIVE",
-      createdAt: at,
-      updatedAt: at,
-      expiresAt:
-        options.expiresAt === undefined
-          ? expirationFor(artifact)
-          : options.expiresAt,
-      reclaimableAt: null,
-      gcPendingAt: null,
-      deletedAt: null,
-      pinnedAt: null,
-      holdReason: null,
-    };
-    index.references.push(reference);
-    return cloneReference(reference);
-  });
+      const at = nowIso();
+      putObjectRow(db, {
+        objectId: artifact.objectId,
+        digest: artifact.digest,
+        sizeBytes: artifact.sizeBytes,
+        state: "ACTIVE",
+        createdAt: object?.createdAt ?? artifact.createdAt,
+        updatedAt: at,
+      });
+
+      const reference: StorageReference = {
+        version: 1,
+        artifact: { ...artifact },
+        lifecycle: "ACTIVE",
+        createdAt: at,
+        updatedAt: at,
+        expiresAt:
+          options.expiresAt === undefined
+            ? expirationFor(artifact)
+            : options.expiresAt,
+        reclaimableAt: null,
+        gcPendingAt: null,
+        deletedAt: null,
+        pinnedAt: null,
+        holdReason: null,
+      };
+      putReferenceRow(db, reference);
+      return cloneReference(reference);
+    }),
+  root);
 }
 
 export async function listStorageReferences(
   root = owlLabDataRoot(),
 ): Promise<StorageReference[]> {
-  return (await readIndex(root)).references.map(cloneReference);
+  return await withStorageMetadata(
+    (db) => listReferenceRows(db).map(cloneReference),
+    root,
+  );
 }
 
 export async function pinArtifactReference(
   artifactId: string,
   root = owlLabDataRoot(),
 ): Promise<StorageReference> {
-  return await mutateIndex(root, (index) => {
-    const reference = index.references.find(
-      (item) => item.artifact.artifactId === artifactId,
-    );
-    if (!reference || reference.lifecycle === "DELETED") {
-      throw new Error("STORAGE_REFERENCE_NOT_FOUND: artifact reference not found.");
-    }
-    const at = nowIso();
-    reference.lifecycle = "PINNED";
-    reference.pinnedAt = at;
-    reference.updatedAt = at;
-    reference.reclaimableAt = null;
-    reference.gcPendingAt = null;
-    return cloneReference(reference);
-  });
+  return await withStorageMetadata(async (db) =>
+    await transaction(db, () => {
+      const reference = getReferenceRow(db, artifactId);
+      if (!reference || reference.lifecycle === "DELETED") {
+        throw new Error("STORAGE_REFERENCE_NOT_FOUND: artifact reference not found.");
+      }
+      const at = nowIso();
+      reference.lifecycle = "PINNED";
+      reference.pinnedAt = at;
+      reference.updatedAt = at;
+      reference.reclaimableAt = null;
+      reference.gcPendingAt = null;
+      putReferenceRow(db, reference);
+      return cloneReference(reference);
+    }),
+  root);
 }
 
 export async function unpinArtifactReference(
@@ -286,21 +214,22 @@ export async function unpinArtifactReference(
   root = owlLabDataRoot(),
   now = Date.now(),
 ): Promise<StorageReference> {
-  return await mutateIndex(root, (index) => {
-    const reference = index.references.find(
-      (item) => item.artifact.artifactId === artifactId,
-    );
-    if (!reference || reference.lifecycle !== "PINNED") {
-      throw new Error("STORAGE_REFERENCE_NOT_PINNED: artifact reference is not pinned.");
-    }
-    reference.pinnedAt = null;
-    reference.lifecycle =
-      reference.expiresAt && Date.parse(reference.expiresAt) <= now
-        ? "EXPIRED"
-        : "ACTIVE";
-    reference.updatedAt = nowIso(now);
-    return cloneReference(reference);
-  });
+  return await withStorageMetadata(async (db) =>
+    await transaction(db, () => {
+      const reference = getReferenceRow(db, artifactId);
+      if (!reference || reference.lifecycle !== "PINNED") {
+        throw new Error("STORAGE_REFERENCE_NOT_PINNED: artifact reference is not pinned.");
+      }
+      reference.pinnedAt = null;
+      reference.lifecycle =
+        reference.expiresAt && Date.parse(reference.expiresAt) <= now
+          ? "EXPIRED"
+          : "ACTIVE";
+      reference.updatedAt = nowIso(now);
+      putReferenceRow(db, reference);
+      return cloneReference(reference);
+    }),
+  root);
 }
 
 export async function holdArtifactReference(
@@ -311,21 +240,22 @@ export async function holdArtifactReference(
   if (!reason.trim()) {
     throw new Error("STORAGE_HOLD_REASON_REQUIRED: audit hold needs a reason.");
   }
-  return await mutateIndex(root, (index) => {
-    const reference = index.references.find(
-      (item) => item.artifact.artifactId === artifactId,
-    );
-    if (!reference || reference.lifecycle === "DELETED") {
-      throw new Error("STORAGE_REFERENCE_NOT_FOUND: artifact reference not found.");
-    }
-    const at = nowIso();
-    reference.lifecycle = "AUDIT_HOLD";
-    reference.holdReason = reason.trim();
-    reference.updatedAt = at;
-    reference.reclaimableAt = null;
-    reference.gcPendingAt = null;
-    return cloneReference(reference);
-  });
+  return await withStorageMetadata(async (db) =>
+    await transaction(db, () => {
+      const reference = getReferenceRow(db, artifactId);
+      if (!reference || reference.lifecycle === "DELETED") {
+        throw new Error("STORAGE_REFERENCE_NOT_FOUND: artifact reference not found.");
+      }
+      const at = nowIso();
+      reference.lifecycle = "AUDIT_HOLD";
+      reference.holdReason = reason.trim();
+      reference.updatedAt = at;
+      reference.reclaimableAt = null;
+      reference.gcPendingAt = null;
+      putReferenceRow(db, reference);
+      return cloneReference(reference);
+    }),
+  root);
 }
 
 export async function evaluateRetention(
@@ -338,39 +268,44 @@ export async function evaluateRetention(
   const now = options.now ?? Date.now();
   const at = nowIso(now);
 
-  return await mutateIndex(root, (index) => {
-    let changed = 0;
-    for (const reference of index.references) {
-      if (
-        reference.lifecycle === "PINNED" ||
-        reference.lifecycle === "AUDIT_HOLD" ||
-        reference.lifecycle === "DELETED" ||
-        !reference.expiresAt
-      ) {
-        continue;
+  return await withStorageMetadata(async (db) =>
+    await transaction(db, () => {
+      const references = listReferenceRows(db);
+      let changed = 0;
+
+      for (const reference of references) {
+        if (
+          reference.lifecycle === "PINNED" ||
+          reference.lifecycle === "AUDIT_HOLD" ||
+          reference.lifecycle === "DELETED" ||
+          reference.lifecycle === "GC_PENDING" ||
+          !reference.expiresAt
+        ) {
+          continue;
+        }
+        if (Date.parse(reference.expiresAt) > now) continue;
+
+        if (reference.lifecycle === "ACTIVE") {
+          reference.lifecycle = "EXPIRED";
+          reference.updatedAt = at;
+          changed += 1;
+        }
+        if (reference.lifecycle === "EXPIRED") {
+          reference.lifecycle = "RECLAIMABLE";
+          reference.reclaimableAt ??= at;
+          reference.updatedAt = at;
+          changed += 1;
+        }
+        putReferenceRow(db, reference);
       }
 
-      if (Date.parse(reference.expiresAt) > now) continue;
-
-      if (reference.lifecycle === "ACTIVE") {
-        reference.lifecycle = "EXPIRED";
-        reference.updatedAt = at;
-        changed += 1;
-      }
-      if (reference.lifecycle === "EXPIRED") {
-        reference.lifecycle = "RECLAIMABLE";
-        reference.reclaimableAt ??= at;
-        reference.updatedAt = at;
-        changed += 1;
-      }
-    }
-
-    return {
-      evaluatedAt: at,
-      changed,
-      references: index.references.map(cloneReference),
-    };
-  });
+      return {
+        evaluatedAt: at,
+        changed,
+        references: listReferenceRows(db).map(cloneReference),
+      };
+    }),
+  root);
 }
 
 function isLive(reference: StorageReference): boolean {
@@ -381,6 +316,79 @@ function isLive(reference: StorageReference): boolean {
   );
 }
 
+function graceSatisfied(
+  reference: StorageReference,
+  now: number,
+  gracePeriodMs: number,
+): boolean {
+  if (reference.lifecycle === "GC_PENDING") return true;
+  if (reference.lifecycle !== "RECLAIMABLE" || !reference.reclaimableAt) {
+    return false;
+  }
+  return Date.parse(reference.reclaimableAt) + gracePeriodMs <= now;
+}
+
+type GcPlan = {
+  retireOnly: Array<{ artifactId: string; objectId: string }>;
+  deleteObjects: Array<{
+    objectId: string;
+    digest: ArtifactRef["digest"];
+    sizeBytes: number;
+    artifactIds: string[];
+  }>;
+};
+
+function buildGcPlan(
+  references: StorageReference[],
+  now: number,
+  gracePeriodMs: number,
+): GcPlan {
+  const groups = new Map<string, StorageReference[]>();
+  for (const reference of references) {
+    const group = groups.get(reference.artifact.objectId) ?? [];
+    group.push(reference);
+    groups.set(reference.artifact.objectId, group);
+  }
+
+  const retireOnly: GcPlan["retireOnly"] = [];
+  const deleteObjects: GcPlan["deleteObjects"] = [];
+
+  for (const [objectId, group] of groups) {
+    const live = group.filter((reference) => reference.lifecycle !== "DELETED");
+    const eligible = live.filter((reference) =>
+      graceSatisfied(reference, now, gracePeriodMs),
+    );
+    if (eligible.length === 0) continue;
+
+    if (live.some(isLive)) {
+      for (const reference of eligible) {
+        if (!isLive(reference)) {
+          retireOnly.push({
+            artifactId: reference.artifact.artifactId,
+            objectId,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (!live.every((reference) => graceSatisfied(reference, now, gracePeriodMs))) {
+      continue;
+    }
+
+    const exemplar = live[0];
+    if (!exemplar) continue;
+    deleteObjects.push({
+      objectId,
+      digest: exemplar.artifact.digest,
+      sizeBytes: exemplar.artifact.sizeBytes,
+      artifactIds: live.map((reference) => reference.artifact.artifactId),
+    });
+  }
+
+  return { retireOnly, deleteObjects };
+}
+
 export async function collectGarbage(options: {
   root?: string;
   now?: number;
@@ -389,109 +397,155 @@ export async function collectGarbage(options: {
 }): Promise<GarbageCollectionReceipt> {
   const root = options.root ?? owlLabDataRoot();
   const now = options.now ?? Date.now();
-  const gracePeriodMs = Math.max(0, options.gracePeriodMs ?? 7 * DAY_MS);
+  const gracePeriodMs = Math.max(
+    0,
+    options.gracePeriodMs ?? 7 * DAY_MS,
+  );
   const dryRun = options.dryRun ?? false;
   const at = nowIso(now);
 
-  return await mutateIndex(root, async (index) => {
-    const eligible = index.references.filter((reference) => {
-      if (reference.lifecycle !== "RECLAIMABLE") return false;
-      if (!reference.reclaimableAt) return false;
-      return Date.parse(reference.reclaimableAt) + gracePeriodMs <= now;
-    });
-
-    const objectGroups = new Map<string, StorageReference[]>();
-    for (const reference of index.references) {
-      const group = objectGroups.get(reference.artifact.objectId) ?? [];
-      group.push(reference);
-      objectGroups.set(reference.artifact.objectId, group);
-    }
-
-    const retiredReferenceIds: string[] = [];
-    const deletedObjectIds: string[] = [];
-    const retainedSharedObjectIds: string[] = [];
-    let reclaimedBytes = 0;
-    const processedObjectIds = new Set<string>();
-
-    for (const reference of eligible) {
-      if (processedObjectIds.has(reference.artifact.objectId)) continue;
-      processedObjectIds.add(reference.artifact.objectId);
-      const group = objectGroups.get(reference.artifact.objectId) ?? [];
-      const otherLive = group.some(
-        (candidate) =>
-          candidate.artifact.artifactId !== reference.artifact.artifactId &&
-          isLive(candidate),
-      );
-
-      if (otherLive) {
-        if (!dryRun) {
-          reference.lifecycle = "DELETED";
-          reference.deletedAt = at;
-          reference.updatedAt = at;
-        }
-        retiredReferenceIds.push(reference.artifact.artifactId);
-        if (!retainedSharedObjectIds.includes(reference.artifact.objectId)) {
-          retainedSharedObjectIds.push(reference.artifact.objectId);
-        }
-        continue;
-      }
-
-      const allNonDeleted = group.filter(
-        (candidate) => candidate.lifecycle !== "DELETED",
-      );
-      const groupEligible = allNonDeleted.every((candidate) => {
-        if (candidate.lifecycle === "RECLAIMABLE" && candidate.reclaimableAt) {
-          return Date.parse(candidate.reclaimableAt) + gracePeriodMs <= now;
-        }
-        return candidate.lifecycle === "GC_PENDING";
-      });
-      if (!groupEligible) continue;
-
-      if (!dryRun) {
-        for (const candidate of allNonDeleted) {
-          candidate.lifecycle = "GC_PENDING";
-          candidate.gcPendingAt ??= at;
-          candidate.updatedAt = at;
-        }
-
-        const objectPath = artifactObjectPath(reference.artifact.digest, root);
-        try {
-          const stat = await fs.stat(objectPath);
-          await fs.rm(objectPath, { force: false });
-          reclaimedBytes += stat.size;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-
-        for (const candidate of allNonDeleted) {
-          candidate.lifecycle = "DELETED";
-          candidate.deletedAt = at;
-          candidate.updatedAt = at;
-          if (!retiredReferenceIds.includes(candidate.artifact.artifactId)) {
-            retiredReferenceIds.push(candidate.artifact.artifactId);
-          }
-        }
-      } else {
-        for (const candidate of allNonDeleted) {
-          if (!retiredReferenceIds.includes(candidate.artifact.artifactId)) {
-            retiredReferenceIds.push(candidate.artifact.artifactId);
-          }
-        }
-        reclaimedBytes += reference.artifact.sizeBytes;
-      }
-
-      if (!deletedObjectIds.includes(reference.artifact.objectId)) {
-        deletedObjectIds.push(reference.artifact.objectId);
-      }
-    }
-
+  if (dryRun) {
+    const references = await listStorageReferences(root);
+    const plan = buildGcPlan(references, now, gracePeriodMs);
     return {
       evaluatedAt: at,
-      dryRun,
-      retiredReferenceIds,
-      deletedObjectIds,
-      reclaimedBytes,
-      retainedSharedObjectIds,
+      dryRun: true,
+      retiredReferenceIds: [
+        ...plan.retireOnly.map((item) => item.artifactId),
+        ...plan.deleteObjects.flatMap((item) => item.artifactIds),
+      ],
+      deletedObjectIds: plan.deleteObjects.map((item) => item.objectId),
+      reclaimedBytes: plan.deleteObjects.reduce(
+        (sum, item) => sum + item.sizeBytes,
+        0,
+      ),
+      retainedSharedObjectIds: [
+        ...new Set(plan.retireOnly.map((item) => item.objectId)),
+      ],
     };
-  });
+  }
+
+  const plan = await withStorageMetadata(async (db) =>
+    await transaction(db, () => {
+      const references = listReferenceRows(db);
+      const candidate = buildGcPlan(references, now, gracePeriodMs);
+
+      for (const item of candidate.retireOnly) {
+        const reference = getReferenceRow(db, item.artifactId);
+        if (!reference || reference.lifecycle === "DELETED") continue;
+        reference.lifecycle = "DELETED";
+        reference.deletedAt = at;
+        reference.updatedAt = at;
+        putReferenceRow(db, reference);
+      }
+
+      for (const item of candidate.deleteObjects) {
+        const object = getObjectRow(db, item.objectId);
+        if (object?.state === "DELETED") continue;
+        if (object) {
+          putObjectRow(db, {
+            ...object,
+            state: "GC_PENDING",
+            updatedAt: at,
+          });
+        } else {
+          putObjectRow(db, {
+            objectId: item.objectId,
+            digest: item.digest,
+            sizeBytes: item.sizeBytes,
+            state: "GC_PENDING",
+            createdAt: at,
+            updatedAt: at,
+          });
+        }
+
+        for (const artifactId of item.artifactIds) {
+          const reference = getReferenceRow(db, artifactId);
+          if (!reference || reference.lifecycle === "DELETED") continue;
+          reference.lifecycle = "GC_PENDING";
+          reference.gcPendingAt ??= at;
+          reference.updatedAt = at;
+          putReferenceRow(db, reference);
+        }
+      }
+
+      return candidate;
+    }),
+  root);
+
+  let reclaimedBytes = 0;
+  const deletedObjectIds: string[] = [];
+
+  for (const item of plan.deleteObjects) {
+    let deleteError: unknown = null;
+    try {
+      const objectPath = artifactObjectPath(item.digest, root);
+      try {
+        const stat = await fs.stat(objectPath);
+        await fs.rm(objectPath, { force: false });
+        reclaimedBytes += Number(stat.size);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    } catch (error) {
+      deleteError = error;
+    }
+
+    await withStorageMetadata(async (db) =>
+      await transaction(db, () => {
+        const object = getObjectRow(db, item.objectId);
+        if (deleteError) {
+          if (object) {
+            putObjectRow(db, {
+              ...object,
+              state: "ACTIVE",
+              updatedAt: nowIso(),
+            });
+          }
+          for (const artifactId of item.artifactIds) {
+            const reference = getReferenceRow(db, artifactId);
+            if (!reference || reference.lifecycle !== "GC_PENDING") continue;
+            reference.lifecycle = "RECLAIMABLE";
+            reference.gcPendingAt = null;
+            reference.updatedAt = nowIso();
+            putReferenceRow(db, reference);
+          }
+          return;
+        }
+
+        if (object) {
+          putObjectRow(db, {
+            ...object,
+            state: "DELETED",
+            updatedAt: nowIso(),
+          });
+        }
+        for (const artifactId of item.artifactIds) {
+          const reference = getReferenceRow(db, artifactId);
+          if (!reference) continue;
+          reference.lifecycle = "DELETED";
+          reference.deletedAt = nowIso();
+          reference.updatedAt = reference.deletedAt;
+          putReferenceRow(db, reference);
+        }
+      }),
+    root);
+
+    if (deleteError) throw deleteError;
+    deletedObjectIds.push(item.objectId);
+  }
+
+  return {
+    evaluatedAt: at,
+    dryRun: false,
+    retiredReferenceIds: [
+      ...plan.retireOnly.map((item) => item.artifactId),
+      ...plan.deleteObjects.flatMap((item) => item.artifactIds),
+    ],
+    deletedObjectIds,
+    reclaimedBytes,
+    retainedSharedObjectIds: [
+      ...new Set(plan.retireOnly.map((item) => item.objectId)),
+    ],
+  };
 }
