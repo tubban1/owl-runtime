@@ -14,6 +14,7 @@ import {
   RUNTIME_PUBLIC_API_VERSION,
   type RuntimeClient,
   type RuntimeEventRuntimeClient,
+  type StorageRuntimeClient,
   type UserSkillRuntimeClient,
   type WorkflowDiscoveryRuntimeClient,
 } from "./runtimeClient.js";
@@ -44,6 +45,10 @@ const READ_ONLY_RPC_METHODS = new Set<string>([
   "approvals.get",
   "health",
   "events.list",
+  "storage.status",
+  "storage.artifacts.list",
+  "storage.reconcile",
+  "storage.legacy.inventory",
   "diagnostics.get",
 ]);
 
@@ -133,7 +138,8 @@ export function registerRuntimeHttpApi(
   client: RuntimeClient &
     Partial<UserSkillRuntimeClient> &
     Partial<WorkflowDiscoveryRuntimeClient> &
-    Partial<RuntimeEventRuntimeClient> = new InProcessRuntimeClient(),
+    Partial<RuntimeEventRuntimeClient> &
+    Partial<StorageRuntimeClient> = new InProcessRuntimeClient(),
 ) {
   app.get("/runtime/v0.1/info", async (req, res) => {
     if (!apiTokenAuthorized(req)) {
