@@ -6,6 +6,7 @@ on:
       - feature/1.x-runtime-integration-freeze
   pull_request:
     branches:
+      - main
       - feature/1.x-storage-legacy-migration
 
 permissions:
@@ -23,8 +24,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.13.0
           cache: npm
+      - run: node --version
       - run: npm ci
       - run: npm run typecheck
       - run: npm run verify:request-replay
@@ -33,10 +35,16 @@ jobs:
       - run: npm run verify:approval-resume
       - run: npm run verify:public-dto
       - run: npm run verify:schedule-pause-resume
+      - run: npm run verify:storage-key-provider
+      - run: npm run verify:encrypted-metadata-store
+      - run: npm run verify:storage-metadata-sqlite
       - run: npm run verify:storage-foundation
       - run: npm run verify:storage-retention
       - run: npm run verify:legacy-storage-migration
       - run: npm run verify:runtime-integration-freeze
+      - run: npm run verify:detached-task-progress
       - run: npm run verify:public-runtime-client
       - run: npm run verify:http-runtime-client
+      - run: npm run verify:mcp-session-reconnect
       - run: npm run build:types
+      - run: npm run build
