@@ -17,6 +17,10 @@ import {
   type RuntimeEventRuntimeClient,
   type RuntimeEventListRequest,
   type RuntimeEventListResponse,
+  type StorageRuntimeClient,
+  type StorageGarbageCollectionRequest,
+  type StorageArtifactRequest,
+  type LegacyStorageMigrationRequest,
   type UserSkillRuntimeClient,
   type WorkflowDiscoveryRuntimeClient,
   type WorkflowSkillDiscoveryRequest,
@@ -38,6 +42,12 @@ import type {
   PublicDeleteReceiptV1,
   PublicRunReceiptV1,
   PublicScheduleV1,
+  PublicStorageArtifactV1,
+  PublicStorageGcReceiptV1,
+  PublicStorageReconciliationV1,
+  PublicStorageStatusV1,
+  PublicLegacyStorageInventoryV1,
+  PublicLegacyStorageMigrationReceiptV1,
   PublicTaskDetailV1,
   PublicTaskSummaryV1,
 } from "./runtimeDtos.js";
@@ -85,7 +95,7 @@ export type RuntimeInvokeOptions = {
   signal?: AbortSignal;
 };
 
-export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient {
+export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient, StorageRuntimeClient {
   private readonly baseUrl: string;
   private readonly sessionId: string;
   private readonly token?: string;
@@ -205,6 +215,66 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
     request: RuntimeEventListRequest = {},
   ): Promise<RuntimeEventListResponse> {
     return (await this.rpc("events.list", request)) as RuntimeEventListResponse;
+  }
+
+  async getStorageStatus(): Promise<PublicStorageStatusV1> {
+    return await this.rpc<PublicStorageStatusV1>("storage.status");
+  }
+
+  async listStorageArtifacts(): Promise<PublicStorageArtifactV1[]> {
+    return await this.rpc<PublicStorageArtifactV1[]>("storage.artifacts.list");
+  }
+
+  async reconcileStorage(): Promise<PublicStorageReconciliationV1> {
+    return await this.rpc<PublicStorageReconciliationV1>("storage.reconcile");
+  }
+
+  async evaluateStorageRetention() {
+    return await this.rpc<{
+      schemaVersion: 1;
+      evaluatedAt: string;
+      changed: number;
+      artifacts: PublicStorageArtifactV1[];
+    }>("storage.retention.evaluate");
+  }
+
+  async collectStorageGarbage(
+    request: StorageGarbageCollectionRequest,
+  ): Promise<PublicStorageGcReceiptV1> {
+    return await this.rpc<PublicStorageGcReceiptV1>("storage.gc", request);
+  }
+
+  async pinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1> {
+    return await this.rpc<PublicStorageArtifactV1>(
+      "storage.artifacts.pin",
+      request,
+    );
+  }
+
+  async unpinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1> {
+    return await this.rpc<PublicStorageArtifactV1>(
+      "storage.artifacts.unpin",
+      request,
+    );
+  }
+
+  async inventoryLegacyStorage(): Promise<PublicLegacyStorageInventoryV1> {
+    return await this.rpc<PublicLegacyStorageInventoryV1>(
+      "storage.legacy.inventory",
+    );
+  }
+
+  async migrateLegacyStorage(
+    request: LegacyStorageMigrationRequest,
+  ): Promise<PublicLegacyStorageMigrationReceiptV1> {
+    return await this.rpc<PublicLegacyStorageMigrationReceiptV1>(
+      "storage.legacy.migrate",
+      request,
+    );
   }
 
   async getCapabilities(goal = ""): Promise<unknown> {
