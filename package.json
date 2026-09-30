@@ -78,7 +78,8 @@
     "verify:legacy-storage-migration": "OWL_RUNTIME_MODE=test tsx scripts/verify-legacy-storage-migration.ts",
     "verify:storage-metadata-sqlite": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-metadata-sqlite.ts",
     "verify:runtime-integration-freeze": "OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-integration-freeze.ts",
-    "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts"
+    "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts",
+    "verify:storage-key-provider": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-key-provider.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
