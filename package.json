@@ -23,6 +23,7 @@
     "verify:public-events": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-event-journal.ts",
     "verify:request-replay": "OWL_RUNTIME_MODE=test tsx scripts/verify-request-replay.ts",
     "verify:task-memory": "OWL_RUNTIME_MODE=test tsx scripts/verify-task-memory.ts",
+    "verify:detached-task-progress": "OWL_RUNTIME_MODE=test tsx scripts/verify-detached-task-progress.ts",
     "verify:scheduler": "OWL_RUNTIME_MODE=test tsx scripts/verify-scheduler.ts",
     "verify:loop": "OWL_RUNTIME_MODE=test tsx scripts/verify-loop.ts",
     "verify:semantic-memory": "OWL_RUNTIME_MODE=test tsx scripts/verify-semantic-memory.ts",

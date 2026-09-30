@@ -3639,6 +3639,8 @@ export async function getCapabilityManifest(goal = "") {
         surfaces: [
           "task-summary",
           "task-detail",
+          "task-progress",
+          "task-start-receipt",
           "run-receipt",
           "observation",
           "verification",
@@ -3646,6 +3648,17 @@ export async function getCapabilityManifest(goal = "") {
           "schedule",
         ],
         opaqueInternals: ["storage", "staging", "memory"],
+      },
+      detachedTaskExecution: {
+        version: 1,
+        status: "candidate",
+        start: "tasks.start",
+        observe: "tasks.get",
+        synchronousCompatibility: "tasks.run",
+        durableAcrossTransportDisconnect: true,
+        progressRevision: "monotonic-task-event-revision",
+        frontendUpdatePolicy: "consumer-polls-real-progress",
+        transportHoldRequired: false,
       },
       schedulePauseResume: {
         version: 1,
@@ -3747,7 +3760,10 @@ export async function getCapabilityManifest(goal = "") {
         semantic:
           "explicit gated promotion + hybrid/lexical/local-vector retrieval",
       },
-      persistentTasks: "v0.8 + v0.9.5 Primitive-task path",
+      persistentTasks:
+        "v0.8 + v0.9.5 Primitive-task path + 1.x detached start/progress projection",
+      detachedTaskExecution:
+        "1.x candidate: tasks.start returns durable acceptance immediately; tasks.get exposes monotonic real progress so agent frontends do not depend on one long-lived transport request",
       persistentScheduler: "v0.9.6 wake scheduler + scheduled Primitive graphs",
       persistentLoopController:
         "v0.9.7 stateful loops + v0.9.9 durable session phases",

@@ -86,11 +86,43 @@ export type PublicTaskStepV1 = {
   [key: string]: unknown;
 };
 
+export type PublicTaskProgressV1 = {
+  schemaVersion: 1;
+  revision: number;
+  phase: string;
+  terminal: boolean;
+  counts: {
+    total: number;
+    pending: number;
+    running: number;
+    waitingApproval: number;
+    succeeded: number;
+    failed: number;
+    needsReview: number;
+  };
+  activeSteps: Array<{
+    id: string;
+    action: string;
+    startedAt: string | null;
+    activeForMs: number | null;
+  }>;
+  lastMeaningfulAt: string;
+  message: string;
+  lastEvent: {
+    at: string;
+    type: string;
+    stepId: string | null;
+    message: string;
+  } | null;
+  recommendedPollAfterMs: number;
+};
+
 export type PublicTaskDetailV1 = {
   schemaVersion: 1;
   id: string;
   label: string;
   status: PublicTaskStatusV1;
+  progress: PublicTaskProgressV1;
   ownerSessionId: string | null;
   provenance: PublicTaskProvenanceV1 | null;
   executionRevision: PublicExecutionRevisionRefV1 | null;
@@ -119,6 +151,7 @@ export type PublicTaskSummaryV1 = {
   id: string;
   label: string;
   status: PublicTaskStatusV1;
+  progress: PublicTaskProgressV1;
   ownerSessionId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -133,6 +166,17 @@ export type PublicTaskSummaryV1 = {
     needsReview: number;
   };
   [key: string]: unknown;
+};
+
+export type PublicTaskStartReceiptV1 = {
+  schemaVersion: 1;
+  id: string;
+  accepted: boolean;
+  alreadyRunning: boolean;
+  alreadyCompleted?: boolean;
+  acceptedAt: string;
+  status: PublicTaskStatusV1;
+  progress: PublicTaskProgressV1;
 };
 
 export type PublicRunReceiptV1 = {

@@ -12,6 +12,7 @@ import {
   type ResolveTaskStepRequest,
   type ResumeScheduleRequest,
   type RunTaskRequest,
+  type StartTaskRequest,
   type RuntimeClient,
   type RuntimeClientInfo,
   type RuntimeEventRuntimeClient,
@@ -41,6 +42,7 @@ import type {
   PublicApprovalV1,
   PublicDeleteReceiptV1,
   PublicRunReceiptV1,
+  PublicTaskStartReceiptV1,
   PublicScheduleV1,
   PublicStorageArtifactV1,
   PublicStorageGcReceiptV1,
@@ -401,6 +403,10 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
       taskId,
       includeResults,
     });
+  }
+
+  async startTask(request: StartTaskRequest): Promise<PublicTaskStartReceiptV1> {
+    return await this.rpc<PublicTaskStartReceiptV1>("tasks.start", request);
   }
 
   async runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1> {

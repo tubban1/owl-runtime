@@ -77,6 +77,7 @@ import {
   requestTaskPause,
   resolvePersistentTaskStep,
   runPersistentTask,
+  startPersistentTask,
 } from "../../tasks/taskRuntime.js";
 import {
   executePrimitive,
@@ -1877,7 +1878,7 @@ function createServer() {
 
   server.tool(
     "task_status",
-    "Read one persistent task status, including Working/Staging/Episodic memory summaries. Set include_results=true to include stored step outputs and staged-artifact references.",
+    "Read one persistent task status, including monotonic real progress plus Working/Staging/Episodic memory summaries. For long interactive work, poll this after task_start and surface concise truthful progress before the frontend idle deadline; never infer completion until Task state is terminal. Set include_results=true to include stored step outputs and staged-artifact references.",
     {
       task_id: z.string(),
       include_results: z.boolean().optional(),
@@ -1901,8 +1902,41 @@ function createServer() {
   );
 
   server.tool(
+    "task_start",
+    "Start or resume a persistent task as detached Runtime work and return immediately. Use task_status to poll real progress and surface concise frontend updates without holding one ChatGPT/MCP request open.",
+    {
+      task_id: z.string(),
+      max_concurrency: z.number().int().min(1).max(8).optional(),
+      fail_fast: z.boolean().optional(),
+      max_waves: z.number().int().min(1).max(1000).optional(),
+      time_budget_ms: z.number().int().min(1000).max(600000).optional(),
+    },
+    {
+      title: "Start Persistent Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async ({ task_id, max_concurrency, fail_fast, max_waves, time_budget_ms }) => {
+      try {
+        return ok(
+          await startPersistentTask(task_id, {
+            maxConcurrency: max_concurrency,
+            failFast: fail_fast,
+            maxWaves: max_waves,
+            timeBudgetMs: time_budget_ms,
+          }),
+        );
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
     "task_run",
-    "Run or resume a persistent task from its last durable checkpoint. Progress is saved after every execution wave. A time budget or max_waves can intentionally yield back to ChatGPT and continue later.",
+    "Run or resume a persistent task synchronously from its last durable checkpoint. Prefer task_start for long work so ChatGPT can poll task_status and emit real progress updates instead of holding one request open.",
     {
       task_id: z.string(),
       max_concurrency: z.number().int().min(1).max(8).optional(),

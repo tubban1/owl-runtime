@@ -43,6 +43,7 @@ import {
   resumePersistentTaskAfterApproval,
   resolvePersistentTaskStep,
   runPersistentTask,
+  startPersistentTask,
 } from "../tasks/taskRuntime.js";
 import {
   cancelPersistentSchedule,
@@ -97,6 +98,7 @@ import type {
   PublicApprovalV1,
   PublicDeleteReceiptV1,
   PublicRunReceiptV1,
+  PublicTaskStartReceiptV1,
   PublicScheduleV1,
   PublicStorageArtifactV1,
   PublicStorageGcReceiptV1,
@@ -253,6 +255,8 @@ export type RunTaskRequest = {
   maxWaves?: number;
   timeBudgetMs?: number;
 };
+
+export type StartTaskRequest = RunTaskRequest;
 
 export type ResolveTaskStepRequest = {
   taskId: string;
@@ -439,6 +443,7 @@ export interface RuntimeClient {
   createTaskFromActivation(request: CreateTaskFromActivationRequest): Promise<PublicTaskDetailV1>;
   listTasks(): Promise<PublicTaskSummaryV1[]>;
   getTask(taskId: string, includeResults?: boolean): Promise<PublicTaskDetailV1>;
+  startTask(request: StartTaskRequest): Promise<PublicTaskStartReceiptV1>;
   runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1>;
   pauseTask(taskId: string): Promise<PublicTaskDetailV1>;
   cancelTask(taskId: string): Promise<PublicTaskDetailV1>;
@@ -674,6 +679,16 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
 
   async getTask(taskId: string, includeResults = false): Promise<PublicTaskDetailV1> {
     return await getPersistentTaskStatus(taskId, includeResults);
+  }
+
+  async startTask(request: StartTaskRequest): Promise<PublicTaskStartReceiptV1> {
+    return await startPersistentTask(request.taskId, {
+      expectedRevisionDigest: request.expectedRevisionDigest,
+      maxConcurrency: request.maxConcurrency,
+      failFast: request.failFast,
+      maxWaves: request.maxWaves,
+      timeBudgetMs: request.timeBudgetMs,
+    });
   }
 
   async runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1> {

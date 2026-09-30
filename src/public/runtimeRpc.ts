@@ -10,6 +10,7 @@ import type {
   ResolveTaskStepRequest,
   ResumeScheduleRequest,
   RunTaskRequest,
+  StartTaskRequest,
   RuntimeClient,
   RuntimeEventRuntimeClient,
   RuntimeEventListRequest,
@@ -62,6 +63,7 @@ export const RUNTIME_RPC_METHODS = [
   "execution-revisions.create-task",
   "tasks.list",
   "tasks.get",
+  "tasks.start",
   "tasks.run",
   "tasks.pause",
   "tasks.cancel",
@@ -276,6 +278,8 @@ export async function invokeRuntimeRpc(
         requiredString(object, "taskId"),
         optionalBoolean(object, "includeResults") ?? false,
       );
+    case "tasks.start":
+      return await client.startTask(object as StartTaskRequest);
     case "tasks.run":
       return await client.runTask(object as RunTaskRequest);
     case "tasks.pause":

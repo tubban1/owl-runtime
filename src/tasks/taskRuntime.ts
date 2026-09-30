@@ -82,6 +82,7 @@ type StepExecutionResult =
 
 const INSTANCE_ID = randomUUID();
 const activeRuns = new Set<string>();
+const detachedRuns = new Map<string, Promise<void>>();
 const controlSignals = new Map<
   string,
   { pauseRequested?: boolean; cancelRequested?: boolean }
@@ -220,12 +221,75 @@ function publicTaskEvent(
   return event;
 }
 
+function taskProgress(task: PersistentTask) {
+  const counts = {
+    total: task.steps.length,
+    pending: task.steps.filter((step) => step.state === "pending").length,
+    running: task.steps.filter((step) => step.state === "running").length,
+    waitingApproval: task.steps.filter(
+      (step) => step.state === "waiting_approval",
+    ).length,
+    succeeded: task.steps.filter((step) => step.state === "succeeded").length,
+    failed: task.steps.filter((step) => step.state === "failed").length,
+    needsReview: task.steps.filter((step) => step.state === "needs_review").length,
+  };
+  const activeSteps = task.steps
+    .filter((step) => step.state === "running")
+    .map((step) => ({
+      id: step.id,
+      action: step.action,
+      startedAt: step.startedAt ?? null,
+      activeForMs: step.startedAt
+        ? Math.max(0, Date.now() - new Date(step.startedAt).getTime())
+        : null,
+    }));
+  const last = task.events.at(-1);
+  const terminal = ["completed", "failed", "blocked", "cancelled"].includes(
+    task.status,
+  );
+  const phase =
+    task.status === "pending"
+      ? "queued"
+      : task.status === "running"
+        ? activeSteps.length > 0
+          ? "executing"
+          : "starting"
+        : task.status;
+
+  return {
+    schemaVersion: 1 as const,
+    revision: task.progressRevision ?? task.events.length,
+    phase,
+    terminal,
+    counts,
+    activeSteps,
+    lastMeaningfulAt: last?.at ?? task.updatedAt,
+    message:
+      last?.message ??
+      (terminal
+        ? `Task is ${task.status}.`
+        : task.status === "pending"
+          ? "Task is queued."
+          : "Task is still active."),
+    lastEvent: last
+      ? {
+          at: last.at,
+          type: last.type,
+          stepId: last.stepId ?? null,
+          message: publicTaskEvent(last).message,
+        }
+      : null,
+    recommendedPollAfterMs: terminal ? 0 : 3_000,
+  };
+}
+
 function summarizeTask(task: PersistentTask, includeResults = false) {
   return {
     schemaVersion: 1 as const,
     id: task.id,
     label: task.label,
     status: task.status,
+    progress: taskProgress(task),
     ownerSessionId: task.ownerSessionId ?? null,
     provenance: task.provenance ?? null,
     executionRevision: task.executionRevision
@@ -754,6 +818,7 @@ export async function listPersistentTasks() {
     id: task.id,
     label: task.label,
     status: task.status,
+    progress: taskProgress(task),
     ownerSessionId: task.ownerSessionId ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -942,6 +1007,121 @@ export async function getPersistentTaskStatus(
   includeResults = false,
 ) {
   return summarizeTask(await loadTask(id), includeResults);
+}
+
+async function recordDetachedRunFailure(id: string, error: unknown) {
+  try {
+    const task = await loadTask(id);
+    if (["completed", "failed", "blocked", "cancelled"].includes(task.status)) {
+      return;
+    }
+    task.status = "failed";
+    task.runnerInstanceId = undefined;
+    task.runnerPid = undefined;
+    appendTaskEvent(task, {
+      type: "detached_run_failed",
+      message:
+        "Detached task execution failed: " +
+        (error instanceof Error ? error.message : String(error)),
+    });
+    await writePersistentTask(task);
+  } catch {
+    // The original detached-run error remains authoritative if recovery also fails.
+  }
+}
+
+export async function startPersistentTask(
+  id: string,
+  options?: {
+    maxConcurrency?: number;
+    failFast?: boolean;
+    maxWaves?: number;
+    timeBudgetMs?: number;
+    expectedRevisionDigest?: string;
+  },
+) {
+  if (activeRuns.has(id) || detachedRuns.has(id)) {
+    const current = await getPersistentTaskStatus(id, false);
+    return {
+      schemaVersion: 1 as const,
+      id,
+      accepted: true as const,
+      alreadyRunning: true as const,
+      acceptedAt: new Date().toISOString(),
+      status: current.status,
+      progress: current.progress,
+    };
+  }
+
+  const task = await loadTask(id);
+  assertExecutionRevisionDigest(
+    task.executionRevision?.digest,
+    options?.expectedRevisionDigest,
+  );
+
+  // Two transport requests can race across the initial durable read. Re-check
+  // in-memory ownership after that await so only one detached runner is created.
+  if (activeRuns.has(id) || detachedRuns.has(id)) {
+    const current = await getPersistentTaskStatus(id, false);
+    return {
+      schemaVersion: 1 as const,
+      id,
+      accepted: true as const,
+      alreadyRunning: true as const,
+      acceptedAt: new Date().toISOString(),
+      status: current.status,
+      progress: current.progress,
+    };
+  }
+
+  if (task.status === "completed") {
+    return {
+      schemaVersion: 1 as const,
+      id,
+      accepted: false as const,
+      alreadyRunning: false as const,
+      alreadyCompleted: true as const,
+      acceptedAt: new Date().toISOString(),
+      status: task.status,
+      progress: taskProgress(task),
+    };
+  }
+  if (task.status === "cancelled") {
+    throw new Error("Cancelled tasks cannot be resumed.");
+  }
+  const unresolved = task.steps.filter((step) => step.state === "needs_review");
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Task is blocked by interrupted state-changing step(s): ${unresolved
+        .map((step) => step.id)
+        .join(", ")}. Use task_resolve_step first.`,
+    );
+  }
+
+  const acceptedAt = new Date().toISOString();
+  const run = Promise.resolve()
+    .then(async () => {
+      await runPersistentTask(id, options);
+    })
+    .catch(async (error) => {
+      await recordDetachedRunFailure(id, error);
+    })
+    .finally(() => {
+      detachedRuns.delete(id);
+    });
+  detachedRuns.set(id, run);
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const current = await getPersistentTaskStatus(id, false);
+  return {
+    schemaVersion: 1 as const,
+    id,
+    accepted: true as const,
+    alreadyRunning: false as const,
+    acceptedAt,
+    status: current.status,
+    progress: current.progress,
+  };
 }
 
 export async function requestTaskPause(id: string) {

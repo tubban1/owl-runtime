@@ -190,6 +190,32 @@ try {
   assert.equal(executionTargets.defaultTarget, "host");
   assert.equal(executionTargets.silentFallback, false);
 
+  const detachedTask = await client.createTask({
+    label: "http detached task",
+    steps: [
+      {
+        id: "read",
+        action: "fs.read",
+        args: { path: filePath },
+      },
+    ],
+  });
+  const detachedStart = await client.startTask({
+    taskId: detachedTask.id,
+    expectedRevisionDigest: detachedTask.executionRevision?.digest,
+  });
+  assert.equal(detachedStart.accepted, true);
+  assert.equal(detachedStart.progress.schemaVersion, 1);
+  let detachedStatus = await client.getTask(detachedTask.id);
+  const detachedDeadline = Date.now() + 10_000;
+  while (!detachedStatus.progress.terminal && Date.now() < detachedDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    detachedStatus = await client.getTask(detachedTask.id);
+  }
+  assert.equal(detachedStatus.status, "completed");
+  assert.ok(detachedStatus.progress.revision >= detachedStart.progress.revision);
+  await client.deleteTask(detachedTask.id);
+
   const publicEvents = await client.listEvents({
     afterCursor: "runtime-events:0",
     limit: 100,
@@ -251,6 +277,8 @@ try {
     fileObservationAndVerificationOverHttp: true,
     executionTargetManifestOverHttp: true,
     durablePublicEventsOverHttp: true,
+    detachedTaskStartOverHttp: true,
+    taskProgressProjectionOverHttp: true,
     consequentialReplayOverHttp: true,
     replayKeyConflictFailClosed: true,
     replayKeyScopedToLogicalSession: true,

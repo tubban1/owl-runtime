@@ -117,6 +117,7 @@ export interface PersistentTask {
   cancelledAt?: string;
   pauseRequested: boolean;
   cancelRequested: boolean;
+  progressRevision?: number;
   stagingRoot?: string;
   stagingManifestPath?: string;
   stagedArtifacts?: StagedArtifact[];
@@ -308,6 +309,8 @@ export function appendTaskEvent(
   task: PersistentTask,
   event: Omit<PersistentTaskEvent, "at">,
 ): void {
+  task.progressRevision =
+    Math.max(task.progressRevision ?? task.events.length, task.events.length) + 1;
   task.events.push({
     at: new Date().toISOString(),
     ...event,
