@@ -1,9 +1,13 @@
-import { runtimeStatePath } from "../runtime/runtimePaths.js";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { assertAllowedExistingPath } from "../security/pathGuard.js";
+import {
+  commitArtifactFromFile,
+  storageLayout,
+  type ArtifactRef,
+} from "../storage/storageFoundation.js";
+import { registerArtifactReference } from "../storage/storageRetention.js";
 
 export type StagedArtifact = {
   id: string;
@@ -15,6 +19,7 @@ export type StagedArtifact = {
   sha256: string;
   category: "outputs";
   createdAt: string;
+  artifactRef?: ArtifactRef;
 };
 
 export type TaskStageManifest = {
@@ -84,7 +89,7 @@ async function readManifest(
 export function taskStagingRoot(): string {
   return (
     process.env.TASK_STAGING_DIR?.trim() ||
-    runtimeStatePath("staging")
+    storageLayout().staging
   );
 }
 
@@ -191,6 +196,35 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+function mediaTypeFor(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".json":
+      return "application/json";
+    case ".txt":
+    case ".md":
+    case ".csv":
+    case ".log":
+      return "text/plain";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    case ".mp4":
+      return "video/mp4";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".wav":
+      return "audio/wav";
+    case ".pdf":
+      return "application/pdf";
+    default:
+      return "application/octet-stream";
+  }
+}
+
 function safeFilename(value: string): string {
   const cleaned = value.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
   return cleaned.slice(0, 180) || "artifact";
@@ -246,6 +280,14 @@ export async function stageArtifactsFromResult(
     await fs.copyFile(sourcePath, stagedPath);
     await fs.chmod(stagedPath, 0o600).catch(() => undefined);
 
+    const artifactRef = await commitArtifactFromFile({
+      sourcePath: stagedPath,
+      mediaType: mediaTypeFor(stagedPath),
+      retentionClass: "task_staging",
+      provenance: { taskId },
+    });
+    await registerArtifactReference(artifactRef);
+
     const artifact: StagedArtifact = {
       id: `artifact_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
       stepId,
@@ -256,6 +298,7 @@ export async function stageArtifactsFromResult(
       sha256: digest,
       category: "outputs",
       createdAt: new Date().toISOString(),
+      artifactRef,
     };
     added.push(artifact);
     knownSources.add(sourcePath);
