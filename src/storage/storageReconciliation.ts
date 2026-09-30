@@ -191,7 +191,10 @@ export async function reconcileStorage(options: {
     .map((object) => ({
       objectId: object.objectId,
       digest: object.digest,
-      state: object.state,
+      state:
+        object.state === "GC_PENDING"
+          ? ("GC_PENDING" as const)
+          : ("ACTIVE" as const),
     }))
     .sort((a, b) => a.objectId.localeCompare(b.objectId));
 
