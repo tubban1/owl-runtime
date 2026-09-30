@@ -98,6 +98,18 @@ export type PublicTaskDetailV1 = {
   createdAt: string;
   updatedAt: string;
   runCount: number;
+  storage: {
+    encryptedAtRest: boolean;
+    algorithm: string;
+    internalPathsExposed: false;
+  };
+  staging: {
+    artifactCount: number;
+    committedArtifactCount: number;
+    legacyUncommittedArtifactCount: number;
+    artifacts: PublicArtifactRefV1[];
+    internalPathsExposed: false;
+  };
   steps: PublicTaskStepV1[];
   [key: string]: unknown;
 };
