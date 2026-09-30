@@ -237,6 +237,8 @@ Reconciliation must fail closed for missing/corrupt durable evidence. It must ne
 
 ## Encryption
 
+See also: `ENCRYPTED_METADATA_STORE_V1.md` for the normative production encryption and migration gate.
+
 Production local metadata uses **SQLCipher-encrypted SQLite**. Plain SQLite is not an accepted production backend. The storage abstraction remains provider-neutral so tests and future cloud deployments can use other implementations.
 
 Local production requirements:
