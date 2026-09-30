@@ -274,7 +274,17 @@ export type PublicStorageReconciliationV1 = {
   checkedAt: string;
   health: "healthy" | "degraded" | "needs_attention";
   referencedObjectCount: number;
+  metadataObjectCount: number;
   physicalObjectCount: number;
+  gcPendingObjects: Array<{
+    objectId: string;
+    digest: string;
+  }>;
+  metadataObjectsMissingBytes: Array<{
+    objectId: string;
+    digest: string;
+    state: "ACTIVE" | "GC_PENDING";
+  }>;
   missingReferences: Array<{
     artifactId: string;
     objectId: string;
