@@ -51,6 +51,11 @@ export type StorageManifestV1 = {
   version: 1;
   createdAt: string;
   objectAddressing: "sha256";
+  metadataStore: {
+    provider: "sqlite";
+    database: "state/owl.db";
+    schemaVersion: 1;
+  };
 };
 
 export function owlLabDataRoot(): string {
@@ -77,21 +82,56 @@ export function storageLayout(root = owlLabDataRoot()): StorageLayout {
   };
 }
 
-async function writeManifestIfMissing(layout: StorageLayout): Promise<void> {
+async function ensureStorageManifest(layout: StorageLayout): Promise<void> {
+  let existing: Partial<StorageManifestV1> | null = null;
+  try {
+    existing = JSON.parse(
+      await fs.readFile(layout.manifest, "utf8"),
+    ) as Partial<StorageManifestV1>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  if (
+    existing &&
+    (existing.format !== "owl-lab-storage" || existing.version !== 1)
+  ) {
+    throw new Error(
+      "STORAGE_MANIFEST_UNSUPPORTED: existing OWL LAB storage manifest is incompatible.",
+    );
+  }
+
   const manifest: StorageManifestV1 = {
     format: "owl-lab-storage",
     version: STORAGE_FOUNDATION_VERSION,
-    createdAt: new Date().toISOString(),
+    createdAt:
+      typeof existing?.createdAt === "string"
+        ? existing.createdAt
+        : new Date().toISOString(),
     objectAddressing: "sha256",
+    metadataStore: {
+      provider: "sqlite",
+      database: "state/owl.db",
+      schemaVersion: 1,
+    },
   };
+
+  const serialized = JSON.stringify(manifest, null, 2) + "\n";
+  if (existing && JSON.stringify(existing) === JSON.stringify(manifest)) {
+    return;
+  }
+
+  const temp = `${layout.manifest}.${process.pid}.${randomUUID()}.tmp`;
+  await fs.writeFile(temp, serialized, {
+    encoding: "utf8",
+    mode: 0o600,
+    flag: "wx",
+  });
   try {
-    await fs.writeFile(layout.manifest, JSON.stringify(manifest, null, 2) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: "wx",
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    await fs.rename(temp, layout.manifest);
+    await fs.chmod(layout.manifest, 0o600).catch(() => undefined);
+  } finally {
+    await fs.rm(temp, { force: true }).catch(() => undefined);
   }
 }
 
@@ -112,7 +152,7 @@ export async function ensureStorageLayout(
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.chmod(directory, 0o700).catch(() => undefined);
   }
-  await writeManifestIfMissing(layout);
+  await ensureStorageManifest(layout);
   return layout;
 }
 
