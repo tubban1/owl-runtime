@@ -7,6 +7,10 @@ import {
   storageLayout,
 } from "./storageFoundation.js";
 import { listStorageReferences } from "./storageRetention.js";
+import {
+  listObjectRows,
+  withStorageMetadata,
+} from "./storageMetadataStore.js";
 
 export const STORAGE_RECONCILIATION_VERSION = 1 as const;
 
@@ -17,7 +21,17 @@ export type StorageReconciliationReport = {
   checkedAt: string;
   health: StorageHealth;
   referencedObjectCount: number;
+  metadataObjectCount: number;
   physicalObjectCount: number;
+  gcPendingObjects: Array<{
+    objectId: string;
+    digest: string;
+  }>;
+  metadataObjectsMissingBytes: Array<{
+    objectId: string;
+    digest: string;
+    state: "ACTIVE" | "GC_PENDING";
+  }>;
   missingReferences: Array<{
     artifactId: string;
     objectId: string;
@@ -118,6 +132,10 @@ export async function reconcileStorage(options: {
   const references = (await listStorageReferences(root)).filter(
     (reference) => reference.lifecycle !== "DELETED",
   );
+  const metadataObjects = await withStorageMetadata(
+    (db) => listObjectRows(db),
+    root,
+  );
   const objects = await physicalObjects(root);
   const byObjectId = new Map(objects.map((object) => [object.objectId, object]));
 
@@ -157,6 +175,26 @@ export async function reconcileStorage(options: {
     }
   }
 
+  const gcPendingObjects = metadataObjects
+    .filter((object) => object.state === "GC_PENDING")
+    .map((object) => ({
+      objectId: object.objectId,
+      digest: object.digest,
+    }))
+    .sort((a, b) => a.objectId.localeCompare(b.objectId));
+
+  const metadataObjectsMissingBytes = metadataObjects
+    .filter(
+      (object) =>
+        object.state !== "DELETED" && !byObjectId.has(object.objectId),
+    )
+    .map((object) => ({
+      objectId: object.objectId,
+      digest: object.digest,
+      state: object.state,
+    }))
+    .sort((a, b) => a.objectId.localeCompare(b.objectId));
+
   const referencedIds = new Set(references.map((item) => item.artifact.objectId));
   const unreferencedObjects = objects
     .filter((object) => !referencedIds.has(object.objectId))
@@ -174,7 +212,10 @@ export async function reconcileStorage(options: {
   );
 
   const health: StorageHealth =
-    missingReferences.length > 0 || corruptObjects.length > 0
+    missingReferences.length > 0 ||
+    corruptObjects.length > 0 ||
+    gcPendingObjects.length > 0 ||
+    metadataObjectsMissingBytes.length > 0
       ? "needs_attention"
       : unreferencedObjects.length > 0 || stale.length > 0
         ? "degraded"
@@ -185,7 +226,10 @@ export async function reconcileStorage(options: {
     checkedAt: new Date(now).toISOString(),
     health,
     referencedObjectCount: referencedIds.size,
+    metadataObjectCount: metadataObjects.length,
     physicalObjectCount: objects.length,
+    gcPendingObjects,
+    metadataObjectsMissingBytes,
     missingReferences,
     corruptObjects,
     unreferencedObjects,
