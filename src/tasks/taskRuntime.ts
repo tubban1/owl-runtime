@@ -255,7 +255,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
     storage: {
       encryptedAtRest: getTaskStorageInfo().encryptedAtRest,
       algorithm: getTaskStorageInfo().algorithm,
-      internalPathsExposed: false,
+      internalPathsExposed: false as const,
     },
     memoryLayers: {
       working: {
@@ -271,7 +271,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
         bytes:
           task.stagedArtifacts?.reduce((sum, artifact) => sum + artifact.bytes, 0) ??
           0,
-        internalPathsExposed: false,
+        internalPathsExposed: false as const,
       },
       episodic: {
         description:
@@ -292,7 +292,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       legacyUncommittedArtifactCount:
         (task.stagedArtifacts?.length ?? 0) - publicStagedArtifactRefs(task).length,
       artifacts: publicStagedArtifactRefs(task),
-      internalPathsExposed: false,
+      internalPathsExposed: false as const,
     },
     steps: task.steps.map((step) => ({
       id: step.id,
