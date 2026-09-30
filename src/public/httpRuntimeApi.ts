@@ -4,6 +4,7 @@ import { z } from "zod";
 import { runtimeSessionManager } from "../runtime/runtimeSessionManager.js";
 import { withExecutionContext } from "../runtime/executionContext.js";
 import { runtimeMode } from "../runtime/runtimePaths.js";
+import { assertRuntimeMutationAllowed } from "../runtime/runtimeAccessState.js";
 import { withCancellationSignal } from "../runtime/cancellation.js";
 import { runtimeRequestCancellationRegistry } from "../runtime/requestCancellationRegistry.js";
 import {
@@ -28,6 +29,7 @@ const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:@/-]{1,200}$/;
 
 const READ_ONLY_RPC_METHODS = new Set<string>([
   "info",
+  "access.get",
   "capabilities.get",
   "execution-targets.get",
   "primitives.catalog",
@@ -63,6 +65,13 @@ function requestIdempotencyKey(req: Request): string | undefined {
   return value;
 }
 
+const ACCESS_CONTROL_RPC_METHODS = new Set<string>([
+  "access.get",
+  "access.authorize",
+  "access.lock",
+  "access.revoke",
+]);
+
 function requiresConsequentialReplay(
   method: string,
   params: unknown,
@@ -76,6 +85,11 @@ function requiresConsequentialReplay(
   return !["list", "status", "observe", "wait"].includes(
     typeof object.op === "string" ? object.op : "list",
   );
+}
+
+function requiresRuntimeAccess(method: string, params: unknown): boolean {
+  if (ACCESS_CONTROL_RPC_METHODS.has(method)) return false;
+  return requiresConsequentialReplay(method, params);
 }
 
 const rpcRequestSchema = z.object({
@@ -240,8 +254,11 @@ export function registerRuntimeHttpApi(
       });
 
       try {
-        const invoke = async () =>
-          await withExecutionContext(
+        const invoke = async () => {
+          if (requiresRuntimeAccess(parsed.method, parsed.params)) {
+            await assertRuntimeMutationAllowed();
+          }
+          return await withExecutionContext(
             {
               sessionId: sessionId!,
               requestId,
@@ -254,6 +271,7 @@ export function registerRuntimeHttpApi(
                 parsed.params,
               ),
           );
+        };
 
         const replay = await withCancellationSignal(
           active.controller.signal,

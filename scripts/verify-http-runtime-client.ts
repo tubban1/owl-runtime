@@ -11,6 +11,7 @@ await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(scratch, { recursive: true });
 
 process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_RUNTIME_ACCESS_MODE = "enforced";
 process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.ALLOW_WRITE = "true";
@@ -54,6 +55,35 @@ try {
   const info = await client.info();
   assert.equal(info.apiVersion, "0.1");
   assert.equal(info.transport, "http");
+
+  const lockedAccess = await client.getRuntimeAccessState();
+  assert.equal(lockedAccess.state, "LOCKED");
+  await assert.rejects(
+    () =>
+      client.invoke(
+        "tasks.create",
+        {
+          label: "must remain locked",
+          steps: [],
+        },
+        {
+          requestId: "access:locked",
+          idempotencyKey: "access-locked-task",
+        },
+      ),
+    (error: any) =>
+      error?.name === "RuntimeRpcError" &&
+      error?.code === "RUNTIME_ACCESS_LOCKED",
+  );
+
+  const readyAccess = await client.authorizeRuntimeAccess({
+    deviceId: "dev_http_access",
+    organizationId: "org_http_access",
+    principalId: "user_http_access",
+    canRun: true,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  assert.equal(readyAccess.state, "READY");
 
   const capabilities = (await client.getCapabilities("idempotency")) as any;
   assert.equal(capabilities.extensions.consequentialRequestReplay.version, 1);
