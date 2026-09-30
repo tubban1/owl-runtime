@@ -58,9 +58,23 @@ Default local mapping:
 
 Future cloud mapping may use PostgreSQL + S3-compatible object storage + KMS/Secrets Manager without changing public ArtifactRef semantics.
 
+### Local MetadataStore authority
+
+For OWL LAB 1.x local Runtime, the authoritative storage metadata database is:
+
+```text
+state/owl.db
+```
+
+It stores Storage schema migrations, CAS object identity/state, logical Artifact references, retention lifecycle and storage settings. The legacy `state/storage-references.json` format is an import source only: it is imported idempotently into SQLite and retained until governed cleanup.
+
+Runtime 1.x requires Node.js **22.13.0 or newer** so the built-in `node:sqlite` provider can be used without a native third-party database dependency. Compatibility is gated on the minimum baseline and current Node 24.
+
+SQLite metadata contains no credentials or secret tokens. Secrets remain in Keychain or a cloud secret provider. Plain SQLite must not be described as database-level encrypted.
+
 ## Core invariants
 
-1. Permanent APIs never expose physical filesystem paths.
+1. Durable artifact identities and Runtime-internal storage APIs never expose physical filesystem paths. Explicit user/workspace paths used by computer actions are not Artifact identity.
 2. Durable objects are immutable and content-addressed.
 3. Object deletion is allowed only when no live durable reference remains.
 4. Runtime is the sole storage lifecycle authority for Runtime-owned data.
@@ -259,8 +273,8 @@ Inventory record:
 
 ```ts
 type LegacyStorageInventoryItem = {
-  source: "computer-mcp" | "agentos";
-  path: string;
+  source: "computer-mcp" | "agentos" | "owl-runtime";
+  relativePath: string;
   sizeBytes: number;
   modifiedAt: string;
   inferredType: string;
@@ -306,6 +320,8 @@ S5 GC + grace period
 S6 reconciliation  
 S7 legacy inventory/migration  
 S8 Desktop Storage contract  
-S9 migration/integration tests
+S9 migration/integration tests  
+S10 SQLite MetadataStore authority + legacy JSON import  
+S11 Runtime storage/public contract freeze
 
-Only after S1–S9 and Runtime public-contract freeze may Desktop Storage Manager become a mutable product implementation target.
+Only after S1–S11 and Runtime public-contract freeze may Desktop Storage Manager become a mutable product implementation target.
