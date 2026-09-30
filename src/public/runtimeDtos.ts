@@ -247,6 +247,13 @@ export type PublicStorageStatusV1 = {
   foundationVersion: 1;
   retentionVersion: 1;
   reconciliationVersion: 1;
+  metadataStore: {
+    provider: "sqlite";
+    schemaVersion: 1;
+    database: "state/owl.db";
+    absolutePathExposed: false;
+    secretsStoredHere: false;
+  };
   health: "healthy" | "degraded" | "needs_attention";
   usage: {
     logicalReferenceCount: number;
