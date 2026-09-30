@@ -12,6 +12,7 @@ import { resourceArbiter } from "../runtime/resourceArbiter.js";
 import { getProviderStatuses } from "../providers/registry.js";
 import {
   createPersistentPrimitiveTask,
+  getPersistentTaskStatus,
   type PrimitiveTaskStep,
 } from "../tasks/taskRuntime.js";
 import {
@@ -64,6 +65,30 @@ import {
 } from "../runtime/sessionAdapters.js";
 import type { SessionAdapterId } from "../runtime/sessionStore.js";
 import { getRuntimeIdentity } from "../runtime/runtimeIdentity.js";
+import { getExecutionTargetManifest } from "../runtime/executionTarget.js";
+import { getRuntimeRequestReplayManifest } from "../runtime/requestReplayStore.js";
+import { getObservationAbiManifest, type ObservationState } from "../observation/observationAbi.js";
+import {
+  getVerifierAbiManifest,
+  verificationSpecSchema,
+  type VerificationSpec,
+} from "../verification/verifier.js";
+import {
+  approveApproval,
+  authorizeSkill,
+  denyApproval,
+  getApprovalPolicyStatus,
+  listApprovals,
+  readApproval,
+} from "../policy/approvalPolicy.js";
+import {
+  aggregateHealth,
+  approvalHealth,
+  getHealthModelManifest,
+  processHealth,
+  providerHealth,
+  taskHealth,
+} from "../health/healthModel.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
   getStateMigrationRegistry,
@@ -86,7 +111,10 @@ import {
 import {
   claimRecoveredProcess,
   getProcessOutput,
+  interactWithManagedProcess,
   listProcesses,
+  observeProcess,
+  waitForProcessState,
 } from "../tools/shellOps.js";
 import {
   approveWorkspaceHandoff,
@@ -108,6 +136,11 @@ import {
   sendWeChatSessionMessage,
   weChatSessionAdapterContract,
 } from "../runtime/wechatSessionAdapter.js";
+
+import {
+  executeUserSkill,
+  getUserSkillCatalogEntries,
+} from "./userSkillRuntime.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -268,6 +301,30 @@ const SKILL_RUNTIME_METADATA: Record<string, SkillRuntimeMetadata> = {
     },
   },
   "runtime.workspace": {
+    skillVersion: "0.1.0",
+    requiredPrimitiveAbi: 1,
+    requiredPrimitives: [],
+    executionMode: "inline",
+    memoryPolicy: {
+      working: "runtime",
+      staging: "available_when_durable",
+      episodic: "task_events_when_durable",
+      semanticPromotion: "manual",
+    },
+  },
+  "runtime.health": {
+    skillVersion: "0.1.0",
+    requiredPrimitiveAbi: 1,
+    requiredPrimitives: [],
+    executionMode: "inline",
+    memoryPolicy: {
+      working: "runtime",
+      staging: "available_when_durable",
+      episodic: "task_events_when_durable",
+      semanticPromotion: "manual",
+    },
+  },
+  "runtime.approval": {
     skillVersion: "0.1.0",
     requiredPrimitiveAbi: 1,
     requiredPrimitives: [],
@@ -484,6 +541,7 @@ function skillIsReadOnlyForLifecycle(
 ): boolean {
   const operation = skillOperation(args);
   if (skillId === "runtime.control") return true;
+  if (skillId === "runtime.health") return true;
   if (
     skillId === "runtime.state" &&
     ["status", "plan"].includes(operation || "status")
@@ -504,7 +562,13 @@ function skillIsReadOnlyForLifecycle(
   }
   if (
     skillId === "runtime.process" &&
-    ["list", "status"].includes(operation || "list")
+    ["list", "status", "observe", "wait"].includes(operation || "list")
+  ) {
+    return true;
+  }
+  if (
+    skillId === "runtime.approval" &&
+    ["status", "list", "get"].includes(operation || "status")
   ) {
     return true;
   }
@@ -522,6 +586,7 @@ function skillAllowedDuringDrain(
   args: JsonObject,
 ): boolean {
   if (skillId === "runtime.control") return true;
+  if (skillId === "runtime.health") return true;
   const operation = skillOperation(args);
   if (skillId === "runtime.state") return true;
   if (
@@ -542,10 +607,11 @@ function skillAllowedDuringDrain(
   }
   if (
     skillId === "runtime.process" &&
-    ["list", "status", "claim"].includes(operation || "list")
+    ["list", "status", "observe", "wait", "claim"].includes(operation || "list")
   ) {
     return true;
   }
+  if (skillId === "runtime.approval") return true;
   return Boolean(currentExecutionContext().taskId);
 }
 
@@ -612,8 +678,19 @@ function parsePrimitiveTaskSteps(
     const dependsOn = dependsOnRaw.filter(
       (dependency): dependency is string => typeof dependency === "string",
     );
+    let verify: VerificationSpec | undefined;
+    if (value.verify && typeof value.verify === "object" && !Array.isArray(value.verify)) {
+      const rawVerify = value.verify as Record<string, unknown>;
+      verify = verificationSpecSchema.parse({
+        ...rawVerify,
+        id:
+          typeof rawVerify.id === "string" && rawVerify.id.trim()
+            ? rawVerify.id.trim()
+            : `${id}:postcondition`,
+      }) as VerificationSpec;
+    }
 
-    return { id, primitive, op, args: stepArgs, dependsOn };
+    return { id, primitive, op, args: stepArgs, dependsOn, verify };
   });
 }
 
@@ -1017,6 +1094,24 @@ const PROCESS_CONTRACT: SkillContract = {
   resources: [],
 };
 
+const HEALTH_CONTRACT: SkillContract = {
+  riskLevel: "low",
+  idempotent: true,
+  sideEffects: [],
+  requiresVerification: false,
+  retryPolicy: "automatic",
+  resources: [],
+};
+
+const APPROVAL_CONTRACT: SkillContract = {
+  riskLevel: "medium",
+  idempotent: false,
+  sideEffects: ["approval_state_mutation_when_requested"],
+  requiresVerification: true,
+  retryPolicy: "manual",
+  resources: [],
+};
+
 const SESSION_CONTRACT: SkillContract = {
   riskLevel: "high",
   idempotent: false,
@@ -1131,7 +1226,7 @@ const skills: SkillDefinition[] = [
     inputs: {
       label: "Human-readable task label.",
       steps:
-        "Array of Primitive steps: {id, primitive, op, args?, depends_on?}. $ref dependencies are supported.",
+        "Array of Primitive steps: {id, primitive, op, args?, depends_on?, verify?}. verify declares Observation postconditions; $ref dependencies are supported.",
       max_concurrency: "Maximum parallel Primitive steps; default 4, max 8.",
       fail_fast: "Stop after the first failed execution wave; default true.",
     },
@@ -2032,10 +2127,92 @@ const skills: SkillDefinition[] = [
     },
   },
   {
+    id: "runtime.health",
+    domain: "runtime",
+    description:
+      "Return stable health signals for a Persistent Task, managed process, or approval request for Worker-facing status UX.",
+    keywords: ["health", "worker health", "task health", "process health", "健康状态", "运行健康"],
+    contract: HEALTH_CONTRACT,
+    inputs: {
+      op: "status | task | process | approval | provider | providers. Default: status.",
+      task_id: "Persistent Task id for op=task.",
+      process_id: "Managed process id for op=process.",
+      approval_id: "Approval id for op=approval.",
+      provider_id: "Provider id for op=provider.",
+      tail_chars: "Optional process observation log tail length.",
+    },
+    dryRunPlan: (args) => ({ op: args.op ?? "status", sourceId: args.task_id ?? args.process_id ?? args.approval_id ?? null }),
+    run: async (args) => {
+      const operation = typeof args.op === "string" ? args.op.trim().toLowerCase() : "status";
+      if (operation === "status") return getHealthModelManifest();
+      if (operation === "task") {
+        const task = await getPersistentTaskStatus(requiredText(args, "task_id"), false);
+        return taskHealth({ id: task.id, status: task.status, label: task.label });
+      }
+      if (operation === "process") {
+        return processHealth(await observeProcess(
+          requiredText(args, "process_id"),
+          typeof args.tail_chars === "number" ? args.tail_chars : 20_000,
+        ));
+      }
+      if (operation === "approval") {
+        return approvalHealth(await readApproval(requiredText(args, "approval_id")));
+      }
+      if (operation === "providers") {
+        const providers = await getProviderStatuses();
+        const signals = providers.map(providerHealth);
+        return {
+          providers: signals,
+          aggregate: aggregateHealth(signals),
+        };
+      }
+      if (operation === "provider") {
+        const providerId = requiredText(args, "provider_id");
+        const provider = (await getProviderStatuses()).find(
+          (item) => item.id === providerId,
+        );
+        if (!provider) throw new Error(`Unknown provider "${providerId}".`);
+        return providerHealth(provider);
+      }
+      throw new Error('runtime.health op must be "status", "task", "process", "approval", "provider", or "providers".');
+    },
+  },
+  {
+    id: "runtime.approval",
+    domain: "runtime",
+    description:
+      "Inspect, approve, or deny one-time OWL Runtime approval requests bound to exact action/skill arguments.",
+    keywords: ["approval", "approve action", "human approval", "审批", "授权"],
+    contract: APPROVAL_CONTRACT,
+    inputs: {
+      op: "status | list | get | approve | deny. Default: status.",
+      approval_id: "Approval request id for get/approve/deny.",
+      state: "Optional list filter: pending | approved | consumed | denied | expired.",
+      confirm: "Must be true for approve/deny.",
+    },
+    dryRunPlan: (args) => ({ op: args.op ?? "status", approvalId: args.approval_id ?? null }),
+    run: async (args) => {
+      const operation = typeof args.op === "string" ? args.op.trim().toLowerCase() : "status";
+      if (operation === "status") return getApprovalPolicyStatus();
+      if (operation === "list") {
+        const state = typeof args.state === "string" &&
+          ["pending", "approved", "consumed", "denied", "expired"].includes(args.state)
+            ? args.state as "pending" | "approved" | "consumed" | "denied" | "expired"
+            : undefined;
+        return { approvals: await listApprovals({ state }) };
+      }
+      const approvalId = requiredText(args, "approval_id");
+      if (operation === "get") return await readApproval(approvalId);
+      if (operation === "approve") return await approveApproval(approvalId, optionalBoolean(args, "confirm", false));
+      if (operation === "deny") return await denyApproval(approvalId, optionalBoolean(args, "confirm", false));
+      throw new Error('runtime.approval op must be "status", "list", "get", "approve", or "deny".');
+    },
+  },
+  {
     id: "runtime.process",
     domain: "runtime",
     description:
-      "Inspect durable managed processes and explicitly claim an orphaned process after Runtime restart.",
+      "Observe, wait for, interact with, inspect, and explicitly claim durable managed processes.",
     keywords: [
       "process ownership",
       "managed process",
@@ -2047,14 +2224,20 @@ const skills: SkillDefinition[] = [
     ],
     contract: PROCESS_CONTRACT,
     inputs: {
-      op: "list | status | claim. Default: list.",
-      process_id: "Managed process id for status or claim.",
-      tail_chars: "Optional log tail length for status; default 20000.",
+      op: "list | status | observe | wait | interact | claim. Default: list.",
+      process_id: "Managed process id for status/observe/wait/interact/claim.",
+      tail_chars: "Optional log tail length; default 20000.",
+      states: "For wait: target Observation states; defaults to waiting_input/finished/failed/lost.",
+      timeout_ms: "For wait/interact: bounded wait; max 60000 ms.",
+      poll_ms: "For wait/interact: polling interval; 100-5000 ms.",
+      input: "For interact: text written to the live process stdin.",
+      control_token: "Optional process-scoped control capability returned by startProcess; allows safe control after transport/session reconnect.",
     },
     dryRunPlan: (args) => ({
       op: args.op ?? "list",
       processId: args.process_id ?? null,
-      claimRequiresRecoveredOrphan: true,
+      claimRequiresRecoveredOrphanOrCapability: true,
+      processControlCapabilityAccepted: true,
       implicitTakeover: false,
     }),
     run: async (args) => {
@@ -2072,12 +2255,54 @@ const skills: SkillDefinition[] = [
           typeof args.tail_chars === "number" ? args.tail_chars : 20_000,
         );
       }
+      if (operation === "observe") {
+        return await observeProcess(
+          processId,
+          typeof args.tail_chars === "number" ? args.tail_chars : 20_000,
+        );
+      }
+      if (operation === "wait") {
+        return await waitForProcessState(processId, {
+          states: Array.isArray(args.states)
+            ? args.states.filter((value): value is ObservationState =>
+                typeof value === "string" &&
+                [
+                  "ready", "running", "waiting_input", "waiting_network",
+                  "terminating", "finished", "failed", "timed_out", "lost", "unknown",
+                ].includes(value),
+              )
+            : undefined,
+          timeoutMs: typeof args.timeout_ms === "number" ? args.timeout_ms : undefined,
+          pollMs: typeof args.poll_ms === "number" ? args.poll_ms : undefined,
+          tailChars: typeof args.tail_chars === "number" ? args.tail_chars : undefined,
+        });
+      }
+      if (operation === "interact") {
+        return await interactWithManagedProcess(
+          processId,
+          requiredText(args, "input"),
+          {
+            timeoutMs: typeof args.timeout_ms === "number" ? args.timeout_ms : undefined,
+            pollMs: typeof args.poll_ms === "number" ? args.poll_ms : undefined,
+            tailChars: typeof args.tail_chars === "number" ? args.tail_chars : undefined,
+            controlToken:
+              typeof args.control_token === "string"
+                ? args.control_token
+                : undefined,
+          },
+        );
+      }
       if (operation === "claim") {
-        return await claimRecoveredProcess(processId);
+        return await claimRecoveredProcess(
+          processId,
+          typeof args.control_token === "string"
+            ? args.control_token
+            : undefined,
+        );
       }
 
       throw new Error(
-        'runtime.process op must be "list", "status", or "claim".',
+        'runtime.process op must be "list", "status", "observe", "wait", "interact", or "claim".',
       );
     },
   },
@@ -3191,13 +3416,15 @@ function assertSkillCompatibility(skill: SkillDefinition): SkillRuntimeMetadata 
   return metadata;
 }
 
-export function getSkillCatalog() {
-  return skills.map(
+export async function getSkillCatalog() {
+  const builtIn = skills.map(
     ({ run: _run, dryRunPlan: _dryRunPlan, keywords: _keywords, ...skill }) => ({
       ...skill,
+      source: "builtin" as const,
       ...metadataForSkill(skill as SkillDefinition),
     }),
   );
+  return [...builtIn, ...(await getUserSkillCatalogEntries())];
 }
 
 export async function executeSkill(
@@ -3207,9 +3434,7 @@ export async function executeSkill(
 ) {
   const skill = byId.get(skillId);
   if (!skill) {
-    throw new Error(
-      `Unknown skill "${skillId}". Call skill_catalog for supported skills.`,
-    );
+    return await executeUserSkill(skillId, args, dryRun);
   }
 
   const runtimeMetadata = assertSkillCompatibility(skill);
@@ -3226,6 +3451,10 @@ export async function executeSkill(
   }
 
   const startedAt = Date.now();
+  const approval =
+    skill.id === "runtime.approval"
+      ? { required: false, mode: getApprovalPolicyStatus().mode, receipt: null }
+      : await authorizeSkill(skill.id, args, skill.contract);
   const lifecycleMutation =
     skill.contract.sideEffects.length > 0 &&
     !skillIsReadOnlyForLifecycle(skill.id, args) &&
@@ -3243,6 +3472,7 @@ export async function executeSkill(
       domain: skill.domain,
       runtime: runtimeMetadata,
       contract: skill.contract,
+      approval,
       durationMs: Date.now() - startedAt,
       result,
     };
@@ -3264,11 +3494,10 @@ function skillScore(goal: string, skill: SkillDefinition): number {
 
 export async function getCapabilityManifest(goal = "") {
   const identity = getRuntimeIdentity();
-  const recommended = [...skills]
+  const builtInRecommended = [...skills]
     .map((skill) => ({ skill, score: skillScore(goal, skill) }))
     .filter((item) => !goal.trim() || item.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
     .map(({ skill, score }) => ({
       id: skill.id,
       domain: skill.domain,
@@ -3276,12 +3505,217 @@ export async function getCapabilityManifest(goal = "") {
       inputs: skill.inputs,
       runtime: metadataForSkill(skill),
       contract: skill.contract,
+      source: "builtin" as const,
       relevanceScore: score,
     }));
+
+  const userSkills = await getUserSkillCatalogEntries();
+  const normalizedGoal = goal.trim().toLowerCase();
+  const userRecommended = userSkills
+    .map((skill) => {
+      const haystack = [skill.id, skill.title, skill.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const score =
+        !normalizedGoal
+          ? 0
+          : normalizedGoal
+              .split(/\s+/)
+              .filter(Boolean)
+              .reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0);
+      return { skill, score };
+    })
+    .filter((item) => !normalizedGoal || item.score > 0)
+    .map(({ skill, score }) => ({
+      id: skill.id,
+      domain: skill.domain,
+      description: skill.description,
+      inputs: skill.inputs,
+      runtime: {
+        skillVersion: skill.skillVersion,
+        requiredPrimitiveAbi: skill.requiredPrimitiveAbi,
+        requiredPrimitives: skill.requiredPrimitives,
+        executionMode: skill.executionMode,
+        memoryPolicy: skill.memoryPolicy,
+      },
+      contract: skill.contract,
+      source: "user" as const,
+      relevanceScore: score,
+    }));
+
+  const recommended = [...builtInRecommended, ...userRecommended]
+    .sort((a, b) => b.relevanceScore - a.relevanceScore)
+    .slice(0, 8);
 
   return {
     goal: goal || null,
     identity,
+    extensions: {
+      userSkillRegistry: {
+        version: 1,
+        status: "candidate",
+        clientInterface: "UserSkillRuntimeClient",
+        namespaces: [
+          "skill-candidates.submit",
+          "skill-candidates.list",
+          "skill-candidates.get",
+          "skill-candidates.revise",
+          "skill-candidates.validate",
+          "skill-candidates.dismiss",
+          "skill-candidates.compile-test",
+          "skill-candidates.inspect",
+          "skill-candidates.promote",
+          "user-skills.*",
+        ],
+      },
+      workflowSkillDiscovery: {
+        version: 1,
+        status: "candidate",
+        clientInterface: "WorkflowDiscoveryRuntimeClient",
+        namespaces: ["skill-candidates.discover-workflows"],
+        minSuccessfulRuns: 3,
+        writesCandidateStore: false,
+        autoPromotes: false,
+      },
+      publicEventJournal: {
+        version: 1,
+        status: "candidate",
+        clientInterface: "RuntimeEventRuntimeClient",
+        namespaces: ["events.list"],
+        delivery: "durable-cursor-polling",
+        ordering: "global-monotonic-sequence",
+        replay: "at-least-once-safe",
+      },
+      agentRequestProducer: {
+        version: 1,
+        status: "candidate",
+        producer: "user-skill-candidate-validation",
+        eventTypes: [
+          "agent_request.proposed",
+          "agent_request.withdrawn",
+        ],
+        embeddedLlm: false,
+        desktopInboxOwnedByRuntime: false,
+      },
+      consequentialRequestReplay: {
+        ...getRuntimeRequestReplayManifest(),
+        status: "candidate",
+        transport: "http",
+        requestIdRole: "cancellation-attempt-identity",
+        idempotencyKeyRole: "logical-consequential-request-identity",
+      },
+      executionRevision: {
+        version: 1,
+        status: "candidate",
+        model: "immutable-task-bound-digest",
+        create: "tasks.create",
+        execute: "tasks.run.expectedRevisionDigest",
+        mutationAfterCreate: false,
+        purpose: "bind-tested-and-executed-plan",
+      },
+      executionActivation: {
+        version: 1,
+        status: "candidate",
+        model: "tested-revision-evidence-receipt",
+        activate: "execution-revisions.activate",
+        instantiate: "execution-revisions.create-task",
+        atomicAuthority: "encrypted-test-task-record",
+        purpose: "bind-test-evidence-to-exact-production-revision",
+      },
+      approvalResume: {
+        version: 1,
+        status: "candidate",
+        model: "same-task-same-step-resume",
+        approvalOwner: "task+step+exact-args-fingerprint",
+        approve: "approvals.approve",
+        deny: "approvals.deny",
+        reconstructRequest: false,
+      },
+      typedPublicDto: {
+        version: 1,
+        status: "candidate",
+        schemaVersion: 1,
+        surfaces: [
+          "task-summary",
+          "task-detail",
+          "task-progress",
+          "task-start-receipt",
+          "run-receipt",
+          "observation",
+          "verification",
+          "approval",
+          "schedule",
+        ],
+        opaqueInternals: ["storage", "staging", "memory"],
+      },
+      detachedTaskExecution: {
+        version: 1,
+        status: "candidate",
+        start: "tasks.start",
+        observe: "tasks.get",
+        synchronousCompatibility: "tasks.run",
+        durableAcrossTransportDisconnect: true,
+        progressRevision: "monotonic-task-event-revision",
+        frontendUpdatePolicy: "consumer-polls-real-progress",
+        transportHoldRequired: false,
+      },
+      schedulePauseResume: {
+        version: 1,
+        status: "candidate",
+        pause: "schedules.pause",
+        resume: "schedules.resume",
+        identityPreserved: true,
+        defaultMissedRunPolicy: "skip",
+        explicitCatchUp: true,
+      },
+      storageFoundation: {
+        version: 1,
+        status: "candidate",
+        artifactIdentity: "artifactId",
+        objectAddressing: "sha256",
+        immutableObjects: true,
+        physicalPathsPublic: false,
+        deletionAuthority: "runtime",
+      },
+      storageRetention: {
+        version: 1,
+        status: "candidate",
+        policyOwner: "runtime",
+        gracePeriodDefaultDays: 7,
+        sharedObjectReferenceSafe: true,
+        pinSupported: true,
+        auditHoldSupported: true,
+      },
+      legacyStorageMigration: {
+        version: 1,
+        status: "candidate",
+        sources: [".computer-mcp", ".agentos", ".owl-runtime"],
+        inventoryReadOnly: true,
+        digestVerified: true,
+        deletesLegacyData: false,
+        unknownRequiresReview: true,
+      },
+      storageManagement: {
+        version: 1,
+        status: "candidate",
+        clientInterface: "StorageRuntimeClient",
+        namespaces: [
+          "storage.status",
+          "storage.artifacts.list",
+          "storage.reconcile",
+          "storage.retention.evaluate",
+          "storage.gc",
+          "storage.artifacts.pin",
+          "storage.artifacts.unpin",
+          "storage.legacy.inventory",
+          "storage.legacy.migrate",
+        ],
+        deletionAuthority: "runtime",
+        reconciliation: true,
+        internalPathsExposed: false,
+      },
+    },
     architecture: {
       name: identity.productName,
       wakeName: identity.wakeName,
@@ -3293,6 +3727,14 @@ export async function getCapabilityManifest(goal = "") {
         version: 1,
         stability: "candidate",
       },
+      observationAbi: getObservationAbiManifest(),
+      verifierAbi: getVerifierAbiManifest(),
+      providerPostconditions:
+        "v1: deterministic when machine-verifiable; otherwise explicit uncertain/review",
+      executionTarget: getExecutionTargetManifest(),
+      managedProcessStateMachine: "v1 candidate: observe/wait/interact with durable-record compatibility",
+      approvalPolicy: getApprovalPolicyStatus(),
+      healthModel: getHealthModelManifest(),
       skillAbi: {
         runtimeMetadata: [
           "skillVersion",
@@ -3318,11 +3760,24 @@ export async function getCapabilityManifest(goal = "") {
         semantic:
           "explicit gated promotion + hybrid/lexical/local-vector retrieval",
       },
-      persistentTasks: "v0.8 + v0.9.5 Primitive-task path",
+      persistentTasks:
+        "v0.8 + v0.9.5 Primitive-task path + 1.x detached start/progress projection",
+      detachedTaskExecution:
+        "1.x candidate: tasks.start returns durable acceptance immediately; tasks.get exposes monotonic real progress so agent frontends do not depend on one long-lived transport request",
       persistentScheduler: "v0.9.6 wake scheduler + scheduled Primitive graphs",
       persistentLoopController:
         "v0.9.7 stateful loops + v0.9.9 durable session phases",
       semanticPromotion: "v0.9.8 explicit M2 → gate → M3 pipeline",
+      userSkillRegistry:
+        "1.x candidate: digest-bound Candidate → Persistent Test Task → M2/Verifier gates → immutable User Skill Registry",
+      workflowSkillDiscovery:
+        "1.x candidate: repeated verified M2 Primitive workflows → read-only draft proposal → explicit Candidate submit",
+      publicEventJournal:
+        "1.x candidate: encrypted durable global public journal with monotonic sequence, stable cursor, bounded retention and explicit retention-gap errors",
+      agentRequestProducer:
+        "1.x candidate: deterministic User Skill validation state → transactional outbox → AgentRequest public events; no embedded LLM",
+      consequentialRequestReplay:
+        "1.x candidate: logical-session-scoped idempotency key + canonical request digest + encrypted durable replay receipt; crash before terminal receipt fails closed as uncertain",
       globalEpisodicIndex: "v0.9.9 encrypted terminal-task experience index",
       hybridRecall:
         "v0.9.9 unified episodic + semantic lexical/vector recall",

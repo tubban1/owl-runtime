@@ -11,7 +11,7 @@ const primitives = new Set(
     .map((entry: any) => entry.id),
 );
 
-const skills = getSkillCatalog() as any[];
+const skills = await getSkillCatalog() as any[];
 assert.ok(skills.length > 0, "Skill catalog must not be empty.");
 
 for (const skill of skills) {

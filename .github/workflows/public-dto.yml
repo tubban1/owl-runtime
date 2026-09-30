@@ -1,0 +1,43 @@
+name: 1.x Public DTO Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-typed-public-dto
+  pull_request:
+    branches:
+      - feature/1.x-approval-resume
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-dto-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-dto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Verify Public DTO
+        run: npm run verify:public-dto
+      - name: Verify Public Runtime Client
+        run: npm run verify:public-runtime-client
+      - name: Verify HTTP Runtime Client
+        run: npm run verify:http-runtime-client
+      - name: Verify Approval Resume
+        run: npm run verify:approval-resume
+      - name: Build Public Types
+        run: npm run build:types

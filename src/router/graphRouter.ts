@@ -7,6 +7,10 @@ import {
   getActionContract,
   summarizeActionContract,
 } from "../runtime/actionContracts.js";
+import {
+  verificationSpecSchema,
+  type VerificationSpec,
+} from "../verification/verifier.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -15,6 +19,7 @@ export type GraphStep = {
   action: string;
   args?: JsonObject;
   dependsOn?: string[];
+  verify?: VerificationSpec;
 };
 
 type StepState = "pending" | "running" | "succeeded" | "failed" | "skipped";
@@ -103,6 +108,7 @@ type NormalizedStep = {
   explicitDependsOn: string[];
   referenceDependsOn: string[];
   parallelSafe: boolean;
+  verify?: VerificationSpec;
 };
 
 function normalizeSteps(steps: GraphStep[]): NormalizedStep[] {
@@ -141,6 +147,10 @@ function normalizeSteps(steps: GraphStep[]): NormalizedStep[] {
       }
     }
 
+    const verify = step.verify
+      ? (verificationSpecSchema.parse(step.verify) as VerificationSpec)
+      : undefined;
+
     return {
       id: step.id,
       action: step.action,
@@ -149,6 +159,7 @@ function normalizeSteps(steps: GraphStep[]): NormalizedStep[] {
       explicitDependsOn,
       referenceDependsOn,
       parallelSafe: isActionParallelSafe(step.action, step.args ?? {}),
+      ...(verify ? { verify } : {}),
     };
   });
 }
@@ -215,6 +226,7 @@ export function planActionGraph(steps: GraphStep[]) {
       referenceDependsOn: step.referenceDependsOn,
       parallelSafe: step.parallelSafe,
       contract: summarizeActionContract(getActionContract(step.action, step.args)),
+      verificationSpec: step.verify ?? null,
       validation,
       validationError,
     };

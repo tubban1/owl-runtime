@@ -7,35 +7,57 @@ cd "$REPO_ROOT"
 
 VERSION="$(node -p "require('./package.json').version")"
 SHORT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
-AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
+OWL_HOME="${OWL_HOME:-${AGENTOS_HOME:-$HOME/.owl}}"
 RELEASE_NAME="$VERSION-$SHORT_SHA"
-RELEASE_DIR="$AGENTOS_HOME/releases/$RELEASE_NAME"
-TMP_RELEASE="$AGENTOS_HOME/releases/.tmp-$RELEASE_NAME-$$"
-CURRENT_LINK="$AGENTOS_HOME/current"
-ENV_FILE="${AGENTOS_RUNTIME_ENV:-$AGENTOS_HOME/runtime.env}"
-STATE_ROOT="${AGENTOS_PRODUCTION_STATE_ROOT:-$HOME/.computer-mcp}"
-LOG_DIR="$AGENTOS_HOME/logs"
-LABEL="com.agentos.runtime"
+RELEASE_DIR="$OWL_HOME/releases/$RELEASE_NAME"
+TMP_RELEASE="$OWL_HOME/releases/.tmp-$RELEASE_NAME-$$"
+CURRENT_LINK="$OWL_HOME/current"
+ENV_FILE="${OWL_RUNTIME_ENV:-${AGENTOS_RUNTIME_ENV:-$OWL_HOME/runtime.env}}"
+STATE_ROOT="${OWL_PRODUCTION_STATE_ROOT:-${AGENTOS_PRODUCTION_STATE_ROOT:-$HOME/.owl-runtime}}"
+LOG_DIR="$OWL_HOME/logs"
+LABEL="com.owl.runtime"
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
+RUNTIME_HOST_BIN="$HOME/Applications/OWL Runtime.app/Contents/MacOS/OwlRuntimeHost"
 CONTROL_CLIENT="$REPO_ROOT/scripts/runtime-control-client.mjs"
 STATE_CLIENT="$REPO_ROOT/scripts/runtime-state-client.mjs"
 PREVIOUS_RELEASE="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
-DRAIN_TIMEOUT_MS="${AGENTOS_UPGRADE_DRAIN_TIMEOUT_MS:-120000}"
+DRAIN_TIMEOUT_MS="${OWL_UPGRADE_DRAIN_TIMEOUT_MS:-${AGENTOS_UPGRADE_DRAIN_TIMEOUT_MS:-120000}}"
 
 if ! [[ "$DRAIN_TIMEOUT_MS" =~ ^[0-9]+$ ]]; then
-  echo "AGENTOS_UPGRADE_DRAIN_TIMEOUT_MS must be an integer number of milliseconds."
+  echo "OWL_UPGRADE_DRAIN_TIMEOUT_MS must be an integer number of milliseconds."
   exit 2
 fi
 
 if [[ -z "$PREVIOUS_RELEASE" || ! -d "$PREVIOUS_RELEASE" ]]; then
-  echo "No active AgentOS production release is installed."
+  echo "No active OWL production release is installed."
   echo "Use: npm run install:production"
   exit 2
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Production environment does not exist: $ENV_FILE"
+  exit 2
+fi
+
+if [[ ! -x "$RUNTIME_HOST_BIN" ]]; then
+  echo "Stable OWL Runtime Host is not installed: $RUNTIME_HOST_BIN"
+  echo "Install it once with: npm run install:runtime-host"
+  echo "Then grant Full Disk Access to OWL Runtime before production use."
+  exit 2
+fi
+
+RUNTIME_API_TOKEN="$(
+  /bin/zsh -c '
+    set -a
+    source "$1"
+    set +a
+    print -r -- "${OWL_RUNTIME_API_TOKEN:-}"
+  ' _ "$ENV_FILE"
+)"
+if [[ -z "$RUNTIME_API_TOKEN" ]]; then
+  echo "Production environment is missing OWL_RUNTIME_API_TOKEN."
+  echo "Run npm run install:production once with the current Runtime to generate it."
   exit 2
 fi
 
@@ -49,7 +71,7 @@ if [[ "${ALLOW_DIRTY_PRODUCTION_INSTALL:-false}" != "true" ]]; then
   fi
 fi
 
-mkdir -p "$AGENTOS_HOME/releases" "$LOG_DIR"
+mkdir -p "$OWL_HOME/releases" "$LOG_DIR"
 
 PRODUCTION_PORT="$(
   /bin/zsh -c '
@@ -59,12 +81,12 @@ PRODUCTION_PORT="$(
     print -r -- "${PORT:-8787}"
   ' _ "$ENV_FILE"
 )"
-MCP_URL="http://127.0.0.1:$PRODUCTION_PORT/mcp"
+RUNTIME_URL="http://127.0.0.1:$PRODUCTION_PORT"
 HEALTH_URL="http://127.0.0.1:$PRODUCTION_PORT/health"
-CURRENT_HEALTH="$AGENTOS_HOME/upgrade-current-health.json"
+CURRENT_HEALTH="$OWL_HOME/upgrade-current-health.json"
 
 if ! /usr/bin/curl -fsS "$HEALTH_URL" > "$CURRENT_HEALTH" 2>/dev/null; then
-  echo "Current AgentOS Runtime is not healthy at $HEALTH_URL."
+  echo "Current OWL Runtime is not healthy at $HEALTH_URL."
   echo "Use npm run status:production and repair the current service before upgrading."
   exit 1
 fi
@@ -84,7 +106,7 @@ if ! "$NODE_BIN" -e '
   exit 2
 fi
 
-echo "Building AgentOS Runtime $VERSION..."
+echo "Building OWL Runtime $VERSION..."
 "$NPM_BIN" run build
 
 rm -rf "$TMP_RELEASE"
@@ -102,17 +124,17 @@ cat > "$TMP_RELEASE/run.sh" <<EOF
 #!/bin/zsh
 set -euo pipefail
 
-ENV_FILE="${AGENTOS_RUNTIME_ENV:-$ENV_FILE}"
+ENV_FILE="${OWL_RUNTIME_ENV:-${AGENTOS_RUNTIME_ENV:-$ENV_FILE}}"
 if [[ -f "$ENV_FILE" ]]; then
   set -a
   source "$ENV_FILE"
   set +a
 fi
 
-export AGENTOS_RUNTIME_MODE=production
-export AGENTOS_STATE_ROOT="${AGENTOS_PRODUCTION_STATE_ROOT:-$STATE_ROOT}"
+export OWL_RUNTIME_MODE=production
+export OWL_STATE_ROOT="${OWL_PRODUCTION_STATE_ROOT:-${AGENTOS_PRODUCTION_STATE_ROOT:-$STATE_ROOT}}"
 RELEASE_ROOT="\$(cd "\$(dirname "\$0")" && pwd)"
-exec "$NODE_BIN" "\$RELEASE_ROOT/dist/server.js"
+exec "$RUNTIME_HOST_BIN" --env-file "$ENV_FILE" "$NODE_BIN" "\$RELEASE_ROOT/dist/server.js"
 EOF
 chmod 700 "$TMP_RELEASE/run.sh"
 
@@ -133,8 +155,8 @@ CANDIDATE_PORT="$(
   '
 )"
 CANDIDATE_HEALTH_URL="http://127.0.0.1:$CANDIDATE_PORT/health"
-CANDIDATE_MCP_URL="http://127.0.0.1:$CANDIDATE_PORT/mcp"
-CANDIDATE_HEALTH="$AGENTOS_HOME/upgrade-candidate-health.json"
+CANDIDATE_RUNTIME_URL="http://127.0.0.1:$CANDIDATE_PORT"
+CANDIDATE_HEALTH="$OWL_HOME/upgrade-candidate-health.json"
 CANDIDATE_STDOUT="$LOG_DIR/candidate-$RELEASE_NAME.stdout.log"
 CANDIDATE_STDERR="$LOG_DIR/candidate-$RELEASE_NAME.stderr.log"
 CANDIDATE_PID=""
@@ -143,7 +165,7 @@ SWITCHED=false
 
 resume_old_runtime() {
   if [[ "$OLD_DRAINED" == "true" && "$SWITCHED" == "false" ]]; then
-    "$NODE_BIN" "$CONTROL_CLIENT" "$MCP_URL" resume >/dev/null 2>&1 || true
+    /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$CONTROL_CLIENT" "$RUNTIME_URL" resume >/dev/null 2>&1 || true
     OLD_DRAINED=false
   fi
 }
@@ -173,9 +195,9 @@ echo "Starting candidate preflight on port $CANDIDATE_PORT..."
   source "$ENV_FILE"
   set +a
   export PORT="$CANDIDATE_PORT"
-  export AGENTOS_RUNTIME_MODE=production
-  export AGENTOS_STATE_ROOT="$STATE_ROOT"
-  export AGENTOS_CANDIDATE_MODE=true
+  export OWL_RUNTIME_MODE=production
+  export OWL_STATE_ROOT="$STATE_ROOT"
+  export OWL_CANDIDATE_MODE=true
   exec "$NODE_BIN" "$RELEASE_DIR/dist/server.js"
 ) >"$CANDIDATE_STDOUT" 2>"$CANDIDATE_STDERR" &
 CANDIDATE_PID=$!
@@ -227,16 +249,16 @@ if [[ "$CANDIDATE_HEALTHY" != "true" ]]; then
 fi
 
 echo "Candidate preflight healthy. Requesting graceful drain of current Runtime..."
-DRAIN_RESULT="$AGENTOS_HOME/upgrade-drain.json"
-WAIT_RESULT="$AGENTOS_HOME/upgrade-wait.json"
+DRAIN_RESULT="$OWL_HOME/upgrade-drain.json"
+WAIT_RESULT="$OWL_HOME/upgrade-wait.json"
 
-if ! "$NODE_BIN" "$CONTROL_CLIENT" "$MCP_URL" drain   "{\"reason\":\"production upgrade to $VERSION\"}" > "$DRAIN_RESULT"; then
+if ! /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$CONTROL_CLIENT" "$RUNTIME_URL" drain   "{\"reason\":\"production upgrade to $VERSION\"}" > "$DRAIN_RESULT"; then
   echo "Current Runtime rejected the drain request."
   exit 1
 fi
 OLD_DRAINED=true
 
-if ! "$NODE_BIN" "$CONTROL_CLIENT" "$MCP_URL" wait   "{\"timeout_ms\":$DRAIN_TIMEOUT_MS}" > "$WAIT_RESULT"; then
+if ! /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$CONTROL_CLIENT" "$RUNTIME_URL" wait   "{\"timeout_ms\":$DRAIN_TIMEOUT_MS}" > "$WAIT_RESULT"; then
   echo "Drain wait call failed. Resuming current Runtime."
   exit 1
 fi
@@ -251,7 +273,7 @@ if ! "$NODE_BIN" -e '
   exit 1
 fi
 
-STATE_MIGRATION_RESULT="$AGENTOS_HOME/upgrade-state-migration.json"
+STATE_MIGRATION_RESULT="$OWL_HOME/upgrade-state-migration.json"
 STATE_MIGRATION_REQUIRED=false
 if "$NODE_BIN" -e '
   const fs=require("fs");
@@ -263,7 +285,7 @@ fi
 
 if [[ "$STATE_MIGRATION_REQUIRED" == "true" ]]; then
   echo "Current Runtime drained. Applying candidate state-schema migration..."
-  if ! "$NODE_BIN" "$STATE_CLIENT" "$CANDIDATE_MCP_URL" migrate     "{\"confirm\":true}" > "$STATE_MIGRATION_RESULT"; then
+  if ! /usr/bin/env OWL_RUNTIME_API_TOKEN="$RUNTIME_API_TOKEN" "$NODE_BIN" "$STATE_CLIENT" "$CANDIDATE_RUNTIME_URL" migrate     "{\"confirm\":true}" > "$STATE_MIGRATION_RESULT"; then
     echo "Candidate state-schema migration failed. Current Runtime will be resumed."
     exit 1
   fi
@@ -306,7 +328,7 @@ if ! launchctl kickstart -k "gui/$UID/$LABEL"; then
   CUTOVER_STARTED=false
 fi
 
-NEW_HEALTH="$AGENTOS_HOME/last-health.json"
+NEW_HEALTH="$OWL_HOME/last-health.json"
 NEW_HEALTHY=false
 if [[ "$CUTOVER_STARTED" == "true" ]]; then
 for _ in {1..120}; do
@@ -381,7 +403,7 @@ if [[ "$NEW_HEALTHY" != "true" ]]; then
 fi
 
 OLD_DRAINED=false
-echo "AgentOS Runtime graceful production upgrade completed."
+echo "OWL Runtime graceful production upgrade completed."
 echo "  version:   $VERSION"
 echo "  release:   $RELEASE_DIR"
 echo "  previous:  $PREVIOUS_RELEASE"

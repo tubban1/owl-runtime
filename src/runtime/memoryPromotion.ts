@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { injectTestFault } from "./faultInjection.js";
+import { buildTaskEvidenceReceipt } from "./taskEvidence.js";
 import {
   appendTaskEvent,
   readPersistentTask,
@@ -86,56 +87,6 @@ function normalizeTags(tags: string[] = []): string[] {
   ];
 }
 
-function evidenceForTask(
-  task: PersistentTask,
-  requested?: string[],
-): { stepIds: string[]; eventTypes: string[]; digest: string } {
-  const succeeded = new Set(
-    task.steps.filter((step) => step.state === "succeeded").map((step) => step.id),
-  );
-  const requestedIds =
-    requested && requested.length > 0
-      ? requested.map((item) => item.trim()).filter(Boolean)
-      : [...succeeded];
-
-  const stepIds = [...new Set(requestedIds)];
-  const eventTypes = [...new Set(task.events.map((event) => event.type))];
-
-  const evidence = {
-    taskId: task.id,
-    taskStatus: task.status,
-    completedAt: task.completedAt ?? null,
-    steps: stepIds.map((id) => {
-      const step = task.steps.find((item) => item.id === id);
-      return {
-        id,
-        exists: Boolean(step),
-        state: step?.state ?? null,
-        primitive: step?.primitive ?? null,
-        op: step?.op ?? null,
-        resultDigest:
-          step?.state === "succeeded" && step.result !== undefined
-            ? createHash("sha256")
-                .update(JSON.stringify(step.result))
-                .digest("hex")
-            : null,
-      };
-    }),
-    events: task.events.map((event) => ({
-      type: event.type,
-      stepId: event.stepId ?? null,
-    })),
-  };
-
-  return {
-    stepIds,
-    eventTypes,
-    digest: createHash("sha256")
-      .update(JSON.stringify(evidence))
-      .digest("hex"),
-  };
-}
-
 function qualityGate(
   task: PersistentTask,
   input: PromotionCandidateInput,
@@ -203,7 +154,7 @@ function qualityGate(
   };
 }
 
-function detectObviousSecrets(content: string): string[] {
+export function detectObviousSecrets(content: string): string[] {
   const patterns: Array<[string, RegExp]> = [
     ["private_key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i],
     ["openai_like_key", /\bsk-[A-Za-z0-9_-]{20,}\b/],
@@ -213,7 +164,7 @@ function detectObviousSecrets(content: string): string[] {
     ["bearer_token", /\bBearer\s+[A-Za-z0-9._~+\/-]{20,}/i],
     [
       "credential_assignment",
-      /\b(?:password|passwd|api[_-]?key|secret|access[_-]?token)\s*[:=]\s*[^\s,;]{8,}/i,
+      /\b(?:password|passwd|api[_-]?key|secret|access[_-]?token)[\"']?\s*[:=]\s*[\"']?[^\"'\s,;}]{8,}/i,
     ],
   ];
 
@@ -284,7 +235,7 @@ export async function inspectPromotionCandidate(
 
   const task = await readPersistentTask(input.taskId);
   const sensitivity = input.sensitivity ?? "internal";
-  const evidence = evidenceForTask(task, input.evidenceStepIds);
+  const evidence = buildTaskEvidenceReceipt(task, input.evidenceStepIds);
   const quality = qualityGate(task, input, evidence.stepIds);
   const privacy = privacyGate(input, sensitivity);
   const contentDigest = semanticDigest(input.content);
@@ -295,7 +246,7 @@ export async function inspectPromotionCandidate(
         kind: input.kind,
         title: input.title.trim(),
         contentDigest,
-        evidenceDigest: evidence.digest,
+        evidenceDigest: evidence.evidenceDigest,
       }),
     )
     .digest("hex");
@@ -310,7 +261,7 @@ export async function inspectPromotionCandidate(
     sensitivity,
     evidenceStepIds: evidence.stepIds,
     evidenceEventTypes: evidence.eventTypes,
-    evidenceDigest: evidence.digest,
+    evidenceDigest: evidence.evidenceDigest,
     contentDigest,
     candidateDigest,
     qualityGate: quality,

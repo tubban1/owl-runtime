@@ -1,0 +1,6 @@
+{
+  "runtimeHostVersion": "1.0.0",
+  "bundleId": "fan.fde.owl.runtime",
+  "sourceFingerprint": "fa73b4b8ebbed9643f980fe3a0a81f52ec3c17b07b1ad0108193c763365bad24",
+  "productionPolicy": "preserve-installed-runtime-host-through-owl-runtime-1.x"
+}

@@ -3,6 +3,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { StagedArtifact } from "./taskStaging.js";
+import type { ExecutionTarget } from "../runtime/executionTarget.js";
+import type { ExecutionActivation, ExecutionRevision } from "./executionRevision.js";
+import type { Observation } from "../observation/observationAbi.js";
+import type {
+  VerificationReceipt,
+  VerificationSpec,
+} from "../verification/verifier.js";
 import {
   createCipheriv,
   createDecipheriv,
@@ -15,6 +22,7 @@ export type PersistentTaskStatus =
   | "pending"
   | "running"
   | "paused"
+  | "waiting_approval"
   | "blocked"
   | "failed"
   | "completed"
@@ -23,6 +31,7 @@ export type PersistentTaskStatus =
 export type PersistentStepState =
   | "pending"
   | "running"
+  | "waiting_approval"
   | "succeeded"
   | "failed"
   | "needs_review";
@@ -40,6 +49,7 @@ export interface PersistentTaskStep {
   riskLevel?: "low" | "medium" | "high" | "critical";
   sideEffects?: string[];
   requiresVerification?: boolean;
+  verificationSpec?: VerificationSpec;
   resources?: Array<{ key: string; mode: "shared" | "exclusive" }>;
   state: PersistentStepState;
   attempts: number;
@@ -47,8 +57,13 @@ export interface PersistentTaskStep {
   completedAt?: string;
   durationMs?: number;
   result?: unknown;
+  observation?: Observation;
+  verification?: VerificationReceipt;
   error?: string;
   recoveryNote?: string;
+  approvalId?: string;
+  approvalFingerprint?: string;
+  approvalRequestedAt?: string;
 }
 
 export interface PersistentTaskEvent {
@@ -58,11 +73,35 @@ export interface PersistentTaskEvent {
   stepId?: string;
 }
 
+export type PersistentTaskProvenance =
+  | {
+      kind: "skill_candidate_test";
+      candidateId: string;
+      candidateDigest: string;
+      inputDigest: string;
+    }
+  | {
+      kind: "user_skill";
+      skillId: string;
+      skillVersion: string;
+      skillDigest: string;
+    }
+  | {
+      kind: "activated_revision";
+      activationId: string;
+      testTaskId: string;
+      revisionDigest: string;
+    };
+
 export interface PersistentTask {
   version: 1;
   id: string;
   label: string;
   ownerSessionId?: string;
+  provenance?: PersistentTaskProvenance;
+  executionRevision?: ExecutionRevision;
+  executionActivation?: ExecutionActivation;
+  executionTarget?: ExecutionTarget;
   createdAt: string;
   updatedAt: string;
   status: PersistentTaskStatus;
@@ -78,6 +117,7 @@ export interface PersistentTask {
   cancelledAt?: string;
   pauseRequested: boolean;
   cancelRequested: boolean;
+  progressRevision?: number;
   stagingRoot?: string;
   stagingManifestPath?: string;
   stagedArtifacts?: StagedArtifact[];
@@ -269,6 +309,8 @@ export function appendTaskEvent(
   task: PersistentTask,
   event: Omit<PersistentTaskEvent, "at">,
 ): void {
+  task.progressRevision =
+    Math.max(task.progressRevision ?? task.events.length, task.events.length) + 1;
   task.events.push({
     at: new Date().toISOString(),
     ...event,

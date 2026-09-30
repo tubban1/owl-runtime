@@ -122,7 +122,7 @@ const reportPath =
 const latestPath = path.join(reportDir, "latest.json");
 const scratch =
   process.env.SOAK_SCRATCH_DIR?.trim() ||
-  path.join(os.tmpdir(), "agentos-soak", runId);
+  path.join(os.tmpdir(), "owl-runtime-soak", runId);
 const state = path.join(scratch, "state");
 
 const repoA = path.join(scratch, "repos", "a");
@@ -156,8 +156,8 @@ for (const dir of repoDirs) {
 }
 await fs.mkdir(reportDir, { recursive: true });
 
-process.env.AGENTOS_RUNTIME_MODE = "test";
-process.env.AGENTOS_STATE_ROOT = state;
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = state;
 process.env.ALLOWED_DIRECTORIES = scratch;
 process.env.ALLOW_WRITE = "true";
 process.env.ALLOW_DELETE = "true";
@@ -182,7 +182,6 @@ process.env.PROCESS_MONITOR_POLL_MS = String(
 process.env.WORKSPACE_LEASE_DIR = path.join(state, "workspace-leases");
 process.env.WORKSPACE_HANDOFF_DIR = path.join(state, "workspace-handoffs");
 process.env.WORKSPACE_SESSION_RECLAIM_GRACE_MS = "250";
-process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS = "60000";
 process.env.SEMANTIC_MEMORY_DIR = path.join(state, "semantic");
 process.env.SEMANTIC_MEMORY_KEY_PATH = path.join(state, "semantic.key");
 process.env.SESSION_ADAPTER_DIR = path.join(state, "sessions");
@@ -405,7 +404,7 @@ function startAdapterSuite(runNumber: number) {
       cwd: root,
       env: {
         ...process.env,
-        AGENTOS_RUNTIME_MODE: "test",
+        OWL_RUNTIME_MODE: "test",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -567,7 +566,13 @@ try {
       await withExecutionContext(sessionA, async () =>
         await ensureWorkspaceWriteLease(sharedRepo, {
           purpose: `${runId} contention ${iteration}`,
-          ttlMs: 10_000,
+          // This assertion is about conflicting ownership, not lease expiry.
+          // A 10s TTL made the 24h soak nondeterministic across macOS sleep or
+          // scheduler stalls: on wake the lease could legitimately expire
+          // before session B's immediately-following write assertion. Keep the
+          // lease valid for the maximum soak window and release it explicitly
+          // in finally below.
+          ttlMs: 24 * 60 * 60_000,
         }),
       );
       try {

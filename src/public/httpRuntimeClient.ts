@@ -1,0 +1,506 @@
+import { randomUUID } from "node:crypto";
+import {
+  RUNTIME_PUBLIC_API_VERSION,
+  type ActivateExecutionRevisionRequest,
+  type ApprovalState,
+  type CreateScheduleRequest,
+  type CreateTaskFromActivationRequest,
+  type CreateTaskRequest,
+  type HealthRequest,
+  type PrimitiveCallRequest,
+  type ProcessRequest,
+  type ResolveTaskStepRequest,
+  type ResumeScheduleRequest,
+  type RunTaskRequest,
+  type StartTaskRequest,
+  type RuntimeClient,
+  type RuntimeClientInfo,
+  type RuntimeEventRuntimeClient,
+  type RuntimeEventListRequest,
+  type RuntimeEventListResponse,
+  type StorageRuntimeClient,
+  type StorageGarbageCollectionRequest,
+  type StorageArtifactRequest,
+  type LegacyStorageMigrationRequest,
+  type UserSkillRuntimeClient,
+  type WorkflowDiscoveryRuntimeClient,
+  type WorkflowSkillDiscoveryRequest,
+  type SkillRunRequest,
+  type SkillCandidateSubmitRequest,
+  type SkillCandidateReviseRequest,
+  type SkillCandidateValidateRequest,
+  type SkillCandidateCompileTestRequest,
+  type SkillCandidateInspectRequest,
+  type SkillCandidatePromoteRequest,
+  type UserSkillVersionRequest,
+  type UserSkillRollbackRequest,
+  type UserSkillUninstallRequest,
+} from "./runtimeClient.js";
+import type { RuntimeRpcMethod } from "./runtimeRpc.js";
+import type {
+  PublicApprovalActionResultV1,
+  PublicApprovalV1,
+  PublicDeleteReceiptV1,
+  PublicRunReceiptV1,
+  PublicTaskStartReceiptV1,
+  PublicScheduleV1,
+  PublicStorageArtifactV1,
+  PublicStorageGcReceiptV1,
+  PublicStorageReconciliationV1,
+  PublicStorageStatusV1,
+  PublicLegacyStorageInventoryV1,
+  PublicLegacyStorageMigrationReceiptV1,
+  PublicTaskDetailV1,
+  PublicTaskSummaryV1,
+} from "./runtimeDtos.js";
+
+type RpcSuccess = {
+  ok: true;
+  apiVersion: string;
+  requestId: string;
+  rpcId: string | null;
+  result: unknown;
+};
+
+type RpcFailure = {
+  ok: false;
+  apiVersion: string;
+  requestId?: string;
+  error: {
+    code: string;
+    message: string;
+  };
+};
+
+export class RuntimeRpcError extends Error {
+  readonly code: string;
+  readonly requestId?: string;
+
+  constructor(error: RpcFailure) {
+    super(error.error.message);
+    this.name = "RuntimeRpcError";
+    this.code = error.error.code;
+    this.requestId = error.requestId;
+  }
+}
+
+export type HttpRuntimeClientOptions = {
+  baseUrl: string;
+  sessionId: string;
+  token?: string;
+  userAgent?: string;
+};
+
+export type RuntimeInvokeOptions = {
+  requestId?: string;
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+};
+
+export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient, StorageRuntimeClient {
+  private readonly baseUrl: string;
+  private readonly sessionId: string;
+  private readonly token?: string;
+  private readonly userAgent: string;
+
+  constructor(options: HttpRuntimeClientOptions) {
+    const sessionId = options.sessionId.trim();
+    if (!sessionId) {
+      throw new Error("HttpRuntimeClient requires a stable logical sessionId.");
+    }
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.sessionId = sessionId;
+    this.token = options.token;
+    this.userAgent = options.userAgent ?? "owl-runtime-client/0.1";
+  }
+
+  async invoke(
+    method: RuntimeRpcMethod,
+    params?: unknown,
+    options: RuntimeInvokeOptions = {},
+  ): Promise<unknown> {
+    const requestId =
+      options.requestId ??
+      `client:${Date.now().toString(36)}:${randomUUID()}`;
+    const response = await fetch(`${this.baseUrl}/runtime/v0.1/rpc`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": this.userAgent,
+        "x-owl-session-id": this.sessionId,
+        "x-owl-request-id": requestId,
+        ...(options.idempotencyKey
+          ? { "x-owl-idempotency-key": options.idempotencyKey }
+          : {}),
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: JSON.stringify({
+        id: requestId,
+        method,
+        ...(params === undefined ? {} : { params }),
+      }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+
+    const payload = (await response.json()) as RpcSuccess | RpcFailure;
+    if (!response.ok || payload.ok !== true) {
+      throw new RuntimeRpcError(
+        payload.ok === false
+          ? payload
+          : {
+              ok: false,
+              apiVersion: RUNTIME_PUBLIC_API_VERSION,
+              requestId,
+              error: {
+                code: `HTTP_${response.status}`,
+                message: `OWL Runtime HTTP ${response.status}`,
+              },
+            },
+      );
+    }
+    return payload.result;
+  }
+
+  async cancelRequest(requestId: string, reason?: string): Promise<unknown> {
+    const apiRequestId =
+      `cancel:${Date.now().toString(36)}:${randomUUID()}`;
+    const response = await fetch(`${this.baseUrl}/runtime/v0.1/cancel`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": this.userAgent,
+        "x-owl-session-id": this.sessionId,
+        "x-owl-request-id": apiRequestId,
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: JSON.stringify({
+        requestId,
+        ...(reason ? { reason } : {}),
+      }),
+    });
+
+    const payload = (await response.json()) as RpcSuccess | RpcFailure;
+    if (!response.ok || payload.ok !== true) {
+      throw new RuntimeRpcError(
+        payload.ok === false
+          ? payload
+          : {
+              ok: false,
+              apiVersion: RUNTIME_PUBLIC_API_VERSION,
+              requestId: apiRequestId,
+              error: {
+                code: `HTTP_${response.status}`,
+                message: `OWL Runtime HTTP ${response.status}`,
+              },
+            },
+      );
+    }
+    return payload.result;
+  }
+
+  private async rpc<T = unknown>(
+    method: RuntimeRpcMethod,
+    params?: unknown,
+  ): Promise<T> {
+    return (await this.invoke(method, params)) as T;
+  }
+
+  async info(): Promise<RuntimeClientInfo> {
+    const info = (await this.rpc("info")) as RuntimeClientInfo;
+    return {
+      ...info,
+      transport: "http",
+    };
+  }
+
+  async listEvents(
+    request: RuntimeEventListRequest = {},
+  ): Promise<RuntimeEventListResponse> {
+    return (await this.rpc("events.list", request)) as RuntimeEventListResponse;
+  }
+
+  async getStorageStatus(): Promise<PublicStorageStatusV1> {
+    return await this.rpc<PublicStorageStatusV1>("storage.status");
+  }
+
+  async listStorageArtifacts(): Promise<PublicStorageArtifactV1[]> {
+    return await this.rpc<PublicStorageArtifactV1[]>("storage.artifacts.list");
+  }
+
+  async reconcileStorage(): Promise<PublicStorageReconciliationV1> {
+    return await this.rpc<PublicStorageReconciliationV1>("storage.reconcile");
+  }
+
+  async evaluateStorageRetention() {
+    return await this.rpc<{
+      schemaVersion: 1;
+      evaluatedAt: string;
+      changed: number;
+      artifacts: PublicStorageArtifactV1[];
+    }>("storage.retention.evaluate");
+  }
+
+  async collectStorageGarbage(
+    request: StorageGarbageCollectionRequest,
+  ): Promise<PublicStorageGcReceiptV1> {
+    return await this.rpc<PublicStorageGcReceiptV1>("storage.gc", request);
+  }
+
+  async pinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1> {
+    return await this.rpc<PublicStorageArtifactV1>(
+      "storage.artifacts.pin",
+      request,
+    );
+  }
+
+  async unpinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1> {
+    return await this.rpc<PublicStorageArtifactV1>(
+      "storage.artifacts.unpin",
+      request,
+    );
+  }
+
+  async inventoryLegacyStorage(): Promise<PublicLegacyStorageInventoryV1> {
+    return await this.rpc<PublicLegacyStorageInventoryV1>(
+      "storage.legacy.inventory",
+    );
+  }
+
+  async migrateLegacyStorage(
+    request: LegacyStorageMigrationRequest,
+  ): Promise<PublicLegacyStorageMigrationReceiptV1> {
+    return await this.rpc<PublicLegacyStorageMigrationReceiptV1>(
+      "storage.legacy.migrate",
+      request,
+    );
+  }
+
+  async getCapabilities(goal = ""): Promise<unknown> {
+    return await this.rpc("capabilities.get", { goal });
+  }
+
+  async getExecutionTargets(): Promise<unknown> {
+    return await this.rpc("execution-targets.get");
+  }
+
+  async getPrimitiveCatalog(): Promise<unknown> {
+    return await this.rpc("primitives.catalog");
+  }
+
+  async callPrimitive(request: PrimitiveCallRequest): Promise<unknown> {
+    return await this.rpc("primitive.call", request);
+  }
+
+  async getSkillCatalog(): Promise<unknown> {
+    return await this.rpc("skills.catalog");
+  }
+
+  async runSkill(request: SkillRunRequest): Promise<unknown> {
+    return await this.rpc("skill.run", request);
+  }
+  async discoverWorkflowSkillCandidates(
+    request: WorkflowSkillDiscoveryRequest = {},
+  ): Promise<unknown> {
+    return await this.rpc("skill-candidates.discover-workflows", request);
+  }
+
+  async submitSkillCandidate(request: SkillCandidateSubmitRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.submit", request);
+  }
+
+  async listSkillCandidates(): Promise<unknown> {
+    return await this.rpc("skill-candidates.list");
+  }
+
+  async getSkillCandidate(candidateId: string): Promise<unknown> {
+    return await this.rpc("skill-candidates.get", { candidateId });
+  }
+
+  async reviseSkillCandidate(request: SkillCandidateReviseRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.revise", request);
+  }
+
+  async validateSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.validate", request);
+  }
+
+  async dismissSkillCandidate(request: SkillCandidateValidateRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.dismiss", request);
+  }
+
+  async compileSkillCandidateTest(request: SkillCandidateCompileTestRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.compile-test", request);
+  }
+
+  async inspectSkillCandidate(request: SkillCandidateInspectRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.inspect", request);
+  }
+
+  async promoteSkillCandidate(request: SkillCandidatePromoteRequest): Promise<unknown> {
+    return await this.rpc("skill-candidates.promote", request);
+  }
+
+  async listUserSkills(): Promise<unknown> {
+    return await this.rpc("user-skills.list");
+  }
+
+  async getUserSkill(skillId: string): Promise<unknown> {
+    return await this.rpc("user-skills.get", { skillId });
+  }
+
+  async enableUserSkill(skillId: string): Promise<unknown> {
+    return await this.rpc("user-skills.enable", { skillId });
+  }
+
+  async disableUserSkill(skillId: string): Promise<unknown> {
+    return await this.rpc("user-skills.disable", { skillId });
+  }
+
+  async activateUserSkillVersion(request: UserSkillVersionRequest): Promise<unknown> {
+    return await this.rpc("user-skills.activate-version", request);
+  }
+
+  async rollbackUserSkill(request: UserSkillRollbackRequest): Promise<unknown> {
+    return await this.rpc("user-skills.rollback", request);
+  }
+
+  async uninstallUserSkill(request: UserSkillUninstallRequest): Promise<unknown> {
+    return await this.rpc("user-skills.uninstall", request);
+  }
+
+  async createTask(request: CreateTaskRequest): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.create", request);
+  }
+
+  async activateExecutionRevision(
+    request: ActivateExecutionRevisionRequest,
+  ): Promise<unknown> {
+    return await this.rpc("execution-revisions.activate", request);
+  }
+
+  async createTaskFromActivation(
+    request: CreateTaskFromActivationRequest,
+  ): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>(
+      "execution-revisions.create-task",
+      request,
+    );
+  }
+
+  async listTasks(): Promise<PublicTaskSummaryV1[]> {
+    return await this.rpc<PublicTaskSummaryV1[]>("tasks.list");
+  }
+
+  async getTask(
+    taskId: string,
+    includeResults = false,
+  ): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.get", {
+      taskId,
+      includeResults,
+    });
+  }
+
+  async startTask(request: StartTaskRequest): Promise<PublicTaskStartReceiptV1> {
+    return await this.rpc<PublicTaskStartReceiptV1>("tasks.start", request);
+  }
+
+  async runTask(request: RunTaskRequest): Promise<PublicRunReceiptV1> {
+    return await this.rpc<PublicRunReceiptV1>("tasks.run", request);
+  }
+
+  async pauseTask(taskId: string): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.pause", { taskId });
+  }
+
+  async cancelTask(taskId: string): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.cancel", { taskId });
+  }
+
+  async resolveTaskStep(
+    request: ResolveTaskStepRequest,
+  ): Promise<PublicTaskDetailV1> {
+    return await this.rpc<PublicTaskDetailV1>("tasks.resolve", request);
+  }
+
+  async deleteTask(taskId: string): Promise<PublicDeleteReceiptV1> {
+    return await this.rpc<PublicDeleteReceiptV1>("tasks.delete", { taskId });
+  }
+
+  async createSchedule(request: CreateScheduleRequest): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.create", request);
+  }
+
+  async listSchedules(): Promise<PublicScheduleV1[]> {
+    return await this.rpc<PublicScheduleV1[]>("schedules.list");
+  }
+
+  async getSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.get", { scheduleId });
+  }
+
+  async pauseSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.pause", { scheduleId });
+  }
+
+  async resumeSchedule(
+    request: ResumeScheduleRequest,
+  ): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.resume", request);
+  }
+
+  async cancelSchedule(scheduleId: string): Promise<PublicScheduleV1> {
+    return await this.rpc<PublicScheduleV1>("schedules.cancel", { scheduleId });
+  }
+
+  async deleteSchedule(scheduleId: string): Promise<PublicDeleteReceiptV1> {
+    return await this.rpc<PublicDeleteReceiptV1>("schedules.delete", { scheduleId });
+  }
+
+  async listApprovals(state?: ApprovalState): Promise<PublicApprovalV1[]> {
+    return await this.rpc<PublicApprovalV1[]>(
+      "approvals.list",
+      state ? { state } : {},
+    );
+  }
+
+  async getApproval(approvalId: string): Promise<PublicApprovalV1> {
+    return await this.rpc<PublicApprovalV1>("approvals.get", { approvalId });
+  }
+
+  async approve(
+    approvalId: string,
+    confirm: boolean,
+  ): Promise<PublicApprovalActionResultV1> {
+    return await this.rpc<PublicApprovalActionResultV1>(
+      "approvals.approve",
+      { approvalId, confirm },
+    );
+  }
+
+  async deny(
+    approvalId: string,
+    confirm: boolean,
+  ): Promise<PublicApprovalActionResultV1> {
+    return await this.rpc<PublicApprovalActionResultV1>(
+      "approvals.deny",
+      { approvalId, confirm },
+    );
+  }
+
+  async process(request: ProcessRequest): Promise<unknown> {
+    return await this.rpc("process", request);
+  }
+
+  async health(request: HealthRequest = { op: "status" }): Promise<unknown> {
+    return await this.rpc("health", request);
+  }
+
+  async getDiagnostics(request: { auditLimit?: number } = {}): Promise<unknown> {
+    return await this.rpc("diagnostics.get", request);
+  }
+}

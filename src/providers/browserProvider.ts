@@ -2,8 +2,10 @@ import { runtimeStatePath } from "../runtime/runtimePaths.js";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import http from "node:http";
 import net from "node:net";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chromium,
   type Browser,
@@ -16,6 +18,11 @@ import {
   assertAllowedTargetPath,
 } from "../security/pathGuard.js";
 import type { ComputerProvider, ProviderStatus } from "./types.js";
+import {
+  currentCancellationSignal,
+  OperationCancelledError,
+  throwIfCancelled,
+} from "../runtime/cancellation.js";
 
 const browserPaths = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -79,11 +86,34 @@ function browserConnectTimeoutMs(): number {
   return 30_000;
 }
 
+async function probeCdpHttp(port: number): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const request = http.get(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/json/version",
+        timeout: 1_000,
+      },
+      (response) => {
+        // Drain the tiny response body so the socket can close cleanly.
+        response.resume();
+        response.once("end", () => resolve(response.statusCode ?? 0));
+      },
+    );
+    request.once("timeout", () => {
+      request.destroy(new Error("CDP probe timed out"));
+    });
+    request.once("error", reject);
+  });
+}
+
 async function waitForCdp(
   port: number,
   child: ChildProcess,
+  devToolsEndpoint: () => string | null,
   timeoutMs = browserStartupTimeoutMs(),
-): Promise<void> {
+): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
 
@@ -92,12 +122,19 @@ async function waitForCdp(
       throw new Error(`Browser exited during startup with code ${child.exitCode}. ${lastError}`);
     }
 
+    // Chrome prints the authoritative browser websocket as soon as DevTools is
+    // listening. Prefer it when present: the rc.4 soak and later regression
+    // loops both observed the HTTP /json/version probe transiently failing even
+    // while Chrome had already announced a live CDP websocket.
+    const websocket = devToolsEndpoint();
+    if (websocket) return websocket;
+
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
-        signal: AbortSignal.timeout(1000),
-      });
-      if (response.ok) return;
-      lastError = `CDP probe returned HTTP ${response.status}`;
+      const status = await probeCdpHttp(port);
+      if (status >= 200 && status < 300) {
+        return `http://127.0.0.1:${port}`;
+      }
+      lastError = `CDP probe returned HTTP ${status}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -127,6 +164,42 @@ function requireBrowserEnabled(): void {
   }
 }
 
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+async function withBrowserCancellation<T>(
+  page: Page,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const signal = currentCancellationSignal();
+  throwIfCancelled(signal);
+  if (!signal) return await operation();
+
+  let abortListener: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abortListener = () => {
+      void page
+        .close({ runBeforeUnload: false })
+        .catch(() => undefined)
+        .finally(() => {
+          reject(new OperationCancelledError(signal.reason));
+        });
+    };
+    signal.addEventListener("abort", abortListener, { once: true });
+  });
+
+  try {
+    const result = await Promise.race([operation(), cancelled]);
+    throwIfCancelled(signal);
+    return result;
+  } finally {
+    if (abortListener) {
+      signal.removeEventListener("abort", abortListener);
+    }
+  }
+}
+
 class BrowserProvider implements ComputerProvider {
   readonly id = "browser";
   readonly label = "Browser";
@@ -137,6 +210,7 @@ class BrowserProvider implements ComputerProvider {
   private chromeProcess: ChildProcess | null = null;
   private cdpPort: number | null = null;
   private currentHeadless: boolean | null = null;
+  private launchPromise: Promise<BrowserContext> | null = null;
 
   async status(): Promise<ProviderStatus> {
     const executable = await detectBrowserExecutable();
@@ -146,6 +220,7 @@ class BrowserProvider implements ComputerProvider {
       enabled: envFlag("ALLOW_BROWSER", false),
       available: Boolean(executable),
       capabilities: ["browser"],
+      executionTargets: ["host"],
       details: {
         executable,
         connected: Boolean(this.context),
@@ -156,26 +231,41 @@ class BrowserProvider implements ComputerProvider {
         browserSpawnArch: runningUnderRosetta() ? "arm64" : process.arch,
         startupTimeoutMs: browserStartupTimeoutMs(),
         connectTimeoutMs: browserConnectTimeoutMs(),
+        startupAttempts: Number.isFinite(Number(process.env.BROWSER_STARTUP_ATTEMPTS))
+          ? Math.min(
+              Math.max(Math.trunc(Number(process.env.BROWSER_STARTUP_ATTEMPTS)), 1),
+              5,
+            )
+          : 3,
       },
     };
   }
 
-  private async launchBrowser(headlessOverride?: boolean): Promise<BrowserContext> {
-    requireBrowserEnabled();
-
-    const executablePath = await detectBrowserExecutable();
-    if (!executablePath) {
-      throw new Error("No supported Chromium browser executable was found.");
+  private async terminateSpawnedBrowser(child: ChildProcess): Promise<void> {
+    if (child.exitCode != null) return;
+    const exited = new Promise<void>((resolve) => {
+      child.once("exit", () => resolve());
+    });
+    child.kill("SIGTERM");
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+    if (child.exitCode == null) {
+      child.kill("SIGKILL");
+      await Promise.race([
+        exited,
+        new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
+      ]);
     }
+  }
 
-    const configuredProfile = process.env.BROWSER_PROFILE_DIR?.trim();
-    const userDataDir =
-      configuredProfile ||
-      runtimeStatePath("browser-profiles", "default");
-    await fs.mkdir(userDataDir, { recursive: true });
-
+  private async launchBrowserAttempt(
+    executablePath: string,
+    userDataDir: string,
+    headless: boolean,
+  ): Promise<BrowserContext> {
     const port = await findFreePort();
-    const headless = headlessOverride ?? envFlag("BROWSER_HEADLESS", false);
     const args = [
       `--remote-debugging-port=${port}`,
       "--remote-debugging-address=127.0.0.1",
@@ -198,21 +288,30 @@ class BrowserProvider implements ComputerProvider {
     });
 
     let stderr = "";
+    let announcedDevToolsEndpoint: string | null = null;
     child.stderr?.on("data", (chunk) => {
       stderr += chunk.toString();
       if (stderr.length > 20_000) stderr = stderr.slice(-20_000);
+      const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+      if (match?.[1]) announcedDevToolsEndpoint = match[1];
     });
 
     try {
-      await waitForCdp(port, child);
-      const browser = await chromium.connectOverCDP(
-        `http://127.0.0.1:${port}`,
-        {
-          timeout: browserConnectTimeoutMs(),
-        },
+      const cdpEndpoint = await waitForCdp(
+        port,
+        child,
+        () => announcedDevToolsEndpoint,
       );
+      const browser = await chromium.connectOverCDP(cdpEndpoint, {
+        timeout: browserConnectTimeoutMs(),
+      });
       const context = browser.contexts()[0];
-      if (!context) throw new Error("Chrome started, but no default browser context was available.");
+      if (!context) {
+        await browser.close().catch(() => undefined);
+        throw new Error(
+          "Chrome started, but no default browser context was available.",
+        );
+      }
 
       this.browser = browser;
       this.context = context;
@@ -232,11 +331,57 @@ class BrowserProvider implements ComputerProvider {
 
       return context;
     } catch (error) {
-      child.kill("SIGTERM");
+      await this.terminateSpawnedBrowser(child);
       throw new Error(
-        `${error instanceof Error ? error.message : String(error)}${stderr.trim() ? `\nChrome stderr: ${stderr.trim()}` : ""}`,
+        `${error instanceof Error ? error.message : String(error)}${
+          stderr.trim() ? `\nChrome stderr: ${stderr.trim()}` : ""
+        }`,
       );
     }
+  }
+
+  private async launchBrowser(headlessOverride?: boolean): Promise<BrowserContext> {
+    requireBrowserEnabled();
+
+    const executablePath = await detectBrowserExecutable();
+    if (!executablePath) {
+      throw new Error("No supported Chromium browser executable was found.");
+    }
+
+    const configuredProfile = process.env.BROWSER_PROFILE_DIR?.trim();
+    const userDataDir =
+      configuredProfile || runtimeStatePath("browser-profiles", "default");
+    await fs.mkdir(userDataDir, { recursive: true });
+
+    const headless = headlessOverride ?? envFlag("BROWSER_HEADLESS", false);
+    const configuredAttempts = Number(process.env.BROWSER_STARTUP_ATTEMPTS);
+    const startupAttempts = Number.isFinite(configuredAttempts)
+      ? Math.min(Math.max(Math.trunc(configuredAttempts), 1), 5)
+      : 3;
+    const errors: string[] = [];
+    for (let attempt = 1; attempt <= startupAttempts; attempt += 1) {
+      try {
+        return await this.launchBrowserAttempt(
+          executablePath,
+          userDataDir,
+          headless,
+        );
+      } catch (error) {
+        errors.push(
+          `attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        if (attempt < startupAttempts) {
+          // A transient Chrome/CDP startup miss must not poison the long-lived
+          // provider. The failed child has already been terminated; retry with
+          // a fresh debugging port after a short bounded backoff.
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        }
+      }
+    }
+
+    throw new Error(
+      `Browser startup failed after ${startupAttempts} attempts. ${errors.join(" | ")}`,
+    );
   }
 
   private async ensureContext(headlessOverride?: boolean): Promise<BrowserContext> {
@@ -250,7 +395,28 @@ class BrowserProvider implements ComputerProvider {
       await this.close();
     }
     if (this.context) return this.context;
-    return await this.launchBrowser(headlessOverride);
+
+    // Multiple sessions may reach a cold BrowserProvider concurrently. Share a
+    // single launch so two Chrome processes never race for the same persistent
+    // profile or try to establish competing CDP endpoints.
+    if (this.launchPromise) {
+      const context = await this.launchPromise;
+      if (
+        headlessOverride === undefined ||
+        this.currentHeadless === headlessOverride
+      ) {
+        return context;
+      }
+      await this.close();
+    }
+
+    const launch = this.launchBrowser(headlessOverride);
+    this.launchPromise = launch;
+    try {
+      return await launch;
+    } finally {
+      if (this.launchPromise === launch) this.launchPromise = null;
+    }
   }
 
   private async page(): Promise<Page> {
@@ -269,7 +435,9 @@ class BrowserProvider implements ComputerProvider {
       await this.ensureContext(headless);
     }
     const page = await this.page();
-    await page.goto(url, { waitUntil, timeout: 60_000 });
+    await withBrowserCancellation(page, async () => {
+      await page.goto(url, { waitUntil, timeout: 60_000 });
+    });
     return { url: page.url(), title: await page.title() };
   }
 
@@ -304,7 +472,9 @@ class BrowserProvider implements ComputerProvider {
     const page = await context.newPage();
     this.activePage = page;
     if (url) {
-      await page.goto(url, { waitUntil, timeout: 60_000 });
+      await withBrowserCancellation(page, async () => {
+        await page.goto(url, { waitUntil, timeout: 60_000 });
+      });
     }
     const pages = context.pages();
     return {
@@ -434,18 +604,76 @@ class BrowserProvider implements ComputerProvider {
   async click(selector: string) {
     const page = await this.page();
     const locator = page.locator(selector).first();
-    await locator.click({ timeout: 30_000 });
+    await withBrowserCancellation(page, async () => {
+      await locator.click({ timeout: 30_000 });
+    });
     return { url: page.url(), title: await page.title(), selector };
   }
 
   async type(selector: string, text: string, submit = false) {
     const page = await this.page();
     const locator = page.locator(selector).first();
-    await locator.fill(text, { timeout: 30_000 });
-    if (submit) await locator.press("Enter");
-    return { url: page.url(), title: await page.title(), selector, submitted: submit };
+    await withBrowserCancellation(page, async () => {
+      await locator.fill(text, { timeout: 30_000 });
+      if (submit) await locator.press("Enter");
+    });
+    return {
+      url: page.url(),
+      title: await page.title(),
+      selector,
+      submitted: submit,
+    };
   }
 
+
+  async controlState(selector: string) {
+    const page = await this.page();
+    const locator = page.locator(selector);
+    const count = await locator.count();
+    if (count === 0) {
+      return {
+        selector,
+        count: 0,
+        exists: false,
+        url: page.url(),
+      };
+    }
+
+    const first = locator.first();
+    const metadata = (await first.evaluate((element) => {
+      const input =
+        element instanceof HTMLInputElement ? element : null;
+      return {
+        tag: element.tagName.toLowerCase(),
+        type: element.getAttribute("type"),
+        checked: input?.checked ?? null,
+        fileCount: input?.files?.length ?? null,
+      };
+    })) as {
+      tag: string;
+      type: string | null;
+      checked: boolean | null;
+      fileCount: number | null;
+    };
+
+    const value = await first
+      .inputValue({ timeout: 5_000 })
+      .catch(() => null);
+
+    return {
+      selector,
+      count,
+      exists: true,
+      url: page.url(),
+      tag: metadata.tag,
+      type: metadata.type,
+      checked: metadata.checked,
+      fileCount: metadata.fileCount,
+      valueLength: typeof value === "string" ? value.length : null,
+      valueSha256:
+        typeof value === "string" ? sha256Text(value) : null,
+    };
+  }
 
   async find(query: string, maxResults = 20) {
     const page = await this.page();
@@ -518,14 +746,16 @@ class BrowserProvider implements ComputerProvider {
 
   async upload(selector: string, files: string[]) {
     if (!files.length) throw new Error("At least one upload file is required.");
-    const safeFiles = [];
+    const safeFiles: string[] = [];
     for (const file of files) {
       safeFiles.push(await assertAllowedExistingPath(file));
     }
 
     const page = await this.page();
     const locator = page.locator(selector).first();
-    await locator.setInputFiles(safeFiles, { timeout: 30_000 });
+    await withBrowserCancellation(page, async () => {
+      await locator.setInputFiles(safeFiles, { timeout: 30_000 });
+    });
     return {
       selector,
       files: safeFiles,

@@ -1,4 +1,4 @@
-import { runtimeStatePath } from "../runtime/runtimePaths.js";
+import { storageLayout } from "../storage/storageFoundation.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -20,7 +20,7 @@ export function runtimeOwnedRoots(): string[] {
   return [
     path.resolve(
       process.env.TASK_STAGING_DIR?.trim() ||
-        runtimeStatePath("staging"),
+        storageLayout().staging,
     ),
   ];
 }

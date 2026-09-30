@@ -12,6 +12,7 @@ import {
   type GlobalEpisodeRecord,
 } from "./episodicStore.js";
 import { hybridRetrievalScore } from "./retrievalVector.js";
+import { buildTaskEvidenceReceipt } from "./taskEvidence.js";
 import {
   embedQueryForDescriptor,
   embedTexts,
@@ -80,6 +81,7 @@ export async function taskToGlobalEpisode(
   }
 
   const searchableText = buildSearchableText(task);
+  const evidence = buildTaskEvidenceReceipt(task);
   const embedding = await embedTexts([searchableText]);
   const vector = embedding.embeddings[0]!;
   const now = new Date().toISOString();
@@ -111,6 +113,8 @@ export async function taskToGlobalEpisode(
     contentDigest: createHash("sha256")
       .update(searchableText.normalize("NFKC"))
       .digest("hex"),
+    evidenceDigest: evidence.evidenceDigest,
+    ...(task.provenance ? { provenance: task.provenance } : {}),
     retrieval: {
       embedding: {
         descriptor: embedding.provider,

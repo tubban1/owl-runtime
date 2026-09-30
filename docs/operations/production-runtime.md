@@ -1,29 +1,30 @@
 # Production Runtime
 
-AgentOS Runtime separates the **development source tree** from the **production Runtime**.
+OWL Runtime separates the **development source tree** from the **production Runtime**.
 
-The production service runs compiled JavaScript from an immutable release directory. It does not run `tsx watch src/server.ts`.
+Production runs compiled JavaScript from an immutable release directory. It never runs a source watcher.
 
 ## Runtime modes and state roots
 
 Default state roots are mode-specific:
 
 ```text
-development -> ~/.computer-mcp-dev
-production  -> ~/.computer-mcp
-test        -> ~/.computer-mcp-test
+development -> ~/.owl-runtime-dev
+production  -> ~/.owl-runtime
+test        -> ~/.owl-runtime-test
 ```
 
-`AGENTOS_STATE_ROOT` can explicitly override the default.
+`OWL_STATE_ROOT` is the canonical explicit override. Legacy `AGENTOS_STATE_ROOT` remains a compatibility fallback.
 
-This prevents development verifiers, source restarts, and experimental tasks from silently sharing production scheduler, loop, task, process, session, and memory state.
+This prevents development verifiers, source restarts, and experimental tasks from silently sharing production Scheduler, Loop, Task, Process, Session, or Memory state.
 
 ## Production layout
 
-The installer uses:
-
 ```text
-~/.agentos/
+~/Applications/
+  OWL Runtime.app/                # stable permission-bearing native host
+
+~/.owl/
   current -> releases/<version>-<git-sha>/
   releases/
     <version>-<git-sha>/
@@ -34,25 +35,65 @@ The installer uses:
       run.sh
   runtime.env
   logs/
+
+~/.owl-runtime/                   # persistent Runtime state
 ```
 
-Persistent Runtime state remains outside the release tree:
+The stable Runtime Host and persistent Runtime state both live outside versioned code releases.
+
+This gives OWL Runtime three independent lifecycles:
 
 ```text
-~/.computer-mcp/
+native permission host
+        ≠
+versioned Runtime code
+        ≠
+persistent Runtime state
 ```
 
-This lets code releases be replaced or rolled back without replacing memory, scheduler, tasks, process records, or other persistent Runtime state.
+## Stable macOS Runtime Host
+
+The production host is:
+
+```text
+~/Applications/OWL Runtime.app
+Contents/MacOS/OwlRuntimeHost
+bundle id: fan.fde.owl.runtime
+```
+
+It is intentionally not rebuilt or replaced during ordinary Runtime promotions. That keeps macOS Full Disk Access attached to a stable executable identity rather than a versioned Node/JavaScript release path.
+
+Install the host once:
+
+```bash
+npm run install:runtime-host
+```
+
+If the exact same host source is already installed, the installer preserves the existing binary unchanged. Native host replacement requires an explicit reviewed host update.
+
+See [Permissions](../security/permissions.md).
 
 ## Install or upgrade
 
 Production release operations refuse tracked dirty source by default.
 
-For the **first** production installation:
+For the first production installation:
 
 ```bash
 npm run install:production
 ```
+
+The install path:
+
+1. ensures the stable OWL Runtime Host is installed;
+2. builds `dist/`;
+3. creates an immutable release directory;
+4. installs production dependencies into that release;
+5. atomically updates `~/.owl/current`;
+6. installs/reloads `com.owl.runtime`;
+7. launchd starts the fixed Runtime Host, which supervises Node running `current/dist/server.js`;
+8. `/health` must report the expected version, production mode, and state root;
+9. if startup health fails and a previous release exists, code selection is rolled back.
 
 For an existing Runtime that supports graceful drain:
 
@@ -60,62 +101,42 @@ For an existing Runtime that supports graceful drain:
 npm run upgrade:production
 ```
 
-See [Production upgrades](production-upgrades.md) for candidate preflight, drain, cutover, and rollback semantics.
+The upgrade path requires the stable Runtime Host to already exist. A normal server upgrade never replaces the host.
 
-A recommended release flow is:
+See [Production upgrades](production-upgrades.md).
 
-```bash
-npm run typecheck
-npm run verify:concurrency
-npm run verify:drain-handoff
-npm run verify:state-schema
-npm run verify:upgrade-runtime
-npm run verify:production-runtime
-git status
-git commit
-git push
-npm run upgrade:production
-```
-
-The first-install path:
-
-1. builds `dist/`
-2. creates a new release directory
-3. installs production dependencies into that release
-4. atomically updates `~/.agentos/current`
-5. installs/reloads the macOS LaunchAgent
-6. starts the Runtime in `AGENTOS_RUNTIME_MODE=production`
-7. checks `/health` for the expected version, production mode, and state root
-8. restores the previous release if the new release fails health verification
-
-The production entry point is:
+## Production execution chain
 
 ```text
-node <release>/dist/server.js
+launchd
+  ↓
+~/Applications/OWL Runtime.app/Contents/MacOS/OwlRuntimeHost
+  ↓
+Node
+  ↓
+~/.owl/current/dist/server.js
 ```
 
-not a source watcher. Production normally owns port `8787`; source development defaults to `8788`.
+A versioned release may change while the native permission identity remains constant.
 
 ## Environment
 
 Production environment is stored at:
 
 ```text
-~/.agentos/runtime.env
+~/.owl/runtime.env
 ```
 
-The first install copies the project `.env` when available; otherwise it creates a minimal environment file.
-
-Keep capability flags and `ALLOWED_DIRECTORIES` there.
-
-The installer explicitly sets:
+The installer sets:
 
 ```text
-AGENTOS_RUNTIME_MODE=production
-AGENTOS_STATE_ROOT=~/.computer-mcp
+OWL_RUNTIME_MODE=production
+OWL_STATE_ROOT=~/.owl-runtime
 ```
 
-unless a production state-root override is supplied.
+unless explicit production overrides are configured.
+
+Keep capability flags and `ALLOWED_DIRECTORIES` in the production environment file.
 
 ## Status
 
@@ -125,46 +146,25 @@ Use:
 npm run status:production
 ```
 
-It reports:
-
-- the current release symlink
-- LaunchAgent status
-- the production environment file
-- `/health`
-
-A healthy production response should report:
-
-```json
-{
-  "ok": true,
-  "version": "0.9.16",
-  "runtime": {
-    "mode": "production"
-  }
-}
-```
+A healthy production response must report the selected release version, `runtime.mode = production`, and the expected state root.
 
 ## Rollback
 
-Install-time rollback is automatic when the newly selected release fails health verification and a previous release exists.
-
-The rollback switches `~/.agentos/current` back to the previous immutable release and restarts the LaunchAgent. Persistent state is not rolled back.
-
-That distinction is intentional:
+Code rollback switches `~/.owl/current` back to the previous immutable release and restarts the service. Persistent state is not automatically rolled back.
 
 ```text
 code rollback != state rollback
 ```
 
-If a migration ever changes durable state incompatibly, it must define its own forward/backward compatibility policy rather than relying on a code symlink rollback.
+If a migration changes durable state incompatibly, it must define its own compatibility policy.
+
+The stable Runtime Host is not rolled back during an ordinary code rollback because it has an independent lifecycle.
 
 ## Runtime self-mutation
 
 Production Runtime code is immutable from the Runtime's own filesystem/Git/shell write surfaces by default.
 
-This prevents a production Jarvis instance from rewriting the same release that is currently executing.
-
-Upgrade by creating a new immutable release. For an existing graceful-drain capable Runtime, prefer `npm run upgrade:production`.
+Upgrade by creating and validating a new immutable release; never edit the active release in place.
 
 ## Uninstall
 
@@ -174,31 +174,16 @@ Use:
 npm run uninstall:production
 ```
 
-This removes the LaunchAgent but intentionally preserves:
-
-- releases
-- `runtime.env`
-- logs
-- persistent Runtime state
-
-That makes reinstall/recovery possible without deleting memory or durable workflows.
+The production service can be removed while preserving releases, environment, logs, and persistent state for recovery. The stable Runtime Host should be treated separately because removing/replacing it may affect macOS permission grants.
 
 ## Verification
 
 Run:
 
 ```bash
+npm run verify:runtime-host
 npm run verify:production-runtime
 npm run verify:upgrade-runtime
 ```
 
-The verifier builds the project, starts `dist/server.js` on an isolated port/state root, and asserts:
-
-- production mode
-- isolated state root
-- expected current release health version
-- session-aware concurrency capabilities
-- workspace leases
-- persistent process ownership
-- production self-protection
-- no source watcher
+The release candidate gate additionally validates the native host source/fingerprint contract and shell syntax.

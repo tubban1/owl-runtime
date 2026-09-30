@@ -1,0 +1,49 @@
+name: 1.x Encrypted Metadata Store Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-sqlite-metadata-store
+  pull_request:
+    branches:
+      - feature/1.x-runtime-integration-freeze
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqlite-metadata-store-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlite-metadata-store:
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 22.13.0
+          - 24
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run verify:storage-foundation
+      - run: npm run verify:storage-retention
+      - run: npm run verify:legacy-storage-migration
+      - run: npm run verify:runtime-integration-freeze
+      - run: npm run verify:storage-metadata-sqlite
+      - run: npm run verify:storage-key-provider
+      - run: npm run verify:encrypted-metadata-store
+      - run: npm run verify:soak-contention-regression
+      - run: npm run verify:public-runtime-client
+      - run: npm run verify:http-runtime-client
+      - run: npm run build:types

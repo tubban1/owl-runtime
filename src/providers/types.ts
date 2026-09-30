@@ -18,6 +18,7 @@ export interface ProviderStatus {
   enabled: boolean;
   available: boolean;
   capabilities: ProviderCapability[];
+  executionTargets?: Array<"host" | "sandbox" | "remote">;
   details?: Record<string, unknown>;
 }
 

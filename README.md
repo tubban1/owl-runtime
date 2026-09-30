@@ -1,10 +1,12 @@
-# AgentOS Runtime
+# OWL Runtime
 
-> Repository/package compatibility name: `computer-mcp`
+> Open-source execution runtime for reliable computer-using AI agents.
 
-AgentOS Runtime is a personal computer-agent execution runtime for ChatGPT. It exposes safe, resumable control through filesystem, shell, Git, browser, macOS desktop, transactions, dependency graphs, persistent tasks, a stable Primitive ISA, reusable Skills, action contracts, and resource arbitration.
+OWL Runtime is the runtime extracted from `computer-mcp`. It owns durable execution: Primitive/Skill contracts, persistent tasks, scheduling, concurrency, recovery, providers, policy enforcement, state, and production lifecycle. MCP is now an adapter, not the architecture boundary.
 
-`v0.8.0` is preserved as the last stable **pre-AgentOS** release for users who prefer the simpler direct-MCP-tool architecture. Starting with `v0.9`, the project evolves as **AgentOS Runtime** while keeping the `computer-mcp` repository/package name for compatibility.
+Current release candidate: `1.0.0-rc.4`. The imported Git history preserves the `computer-mcp` evolution, including the `v0.8.0` pre-AgentOS release.
+
+Repository boundaries: [`docs/architecture/repository-boundaries.md`](docs/architecture/repository-boundaries.md)
 
 Documentation hub: [`docs/README.md`](docs/README.md)
 
@@ -12,21 +14,23 @@ Architecture overview: [`docs/architecture/overview.md`](docs/architecture/overv
 
 Roadmap to 1.0: [`docs/roadmap/v1.0.md`](docs/roadmap/v1.0.md)
 
-L1 Primitive ISA review: [`docs/archive/l1-primitive-isa-review.md`](docs/archive/l1-primitive-isa-review.md)
+## Runtime vs products
 
-Memory & staging model: [`docs/runtime/tasks-and-staging.md`](docs/runtime/tasks-and-staging.md)
+```text
+AI planner / OWL Worker / computer-mcp
+                 │
+          adapter / SDK / IPC
+                 │
+             OWL Runtime
+                 │
+   tasks · scheduler · policy · recovery
+                 │
+      browser · desktop · files · shell
+```
 
-Skill ABI: [`docs/specifications/skill-abi.md`](docs/specifications/skill-abi.md)
+`computer-mcp` remains the compatibility product for MCP clients. `owl-worker` is a separate commercial product and must consume OWL Runtime rather than copy Runtime logic.
 
-Concurrency & durable ownership: [`docs/architecture/concurrency-and-ownership.md`](docs/architecture/concurrency-and-ownership.md)
-
-Production Runtime: [`docs/operations/production-runtime.md`](docs/operations/production-runtime.md)
-
-Multi-agent soak testing: [`docs/operations/soak-testing.md`](docs/operations/soak-testing.md)
-
-### Running Jarvis
-
-For normal daily use, install Production once with `npm run install:production`; launchd then starts Jarvis automatically. For later verified releases, use `npm run upgrade:production` so the new candidate is preflighted and the old Runtime is gracefully drained before cutover. Do **not** run `npm run dev` for normal use. `npm run dev` is only for AgentOS source development and defaults to port `8788` with `~/.computer-mcp-dev`, while Production normally uses port `8787` with `~/.computer-mcp`.
+For daily production use, use `npm run install:production` and `npm run upgrade:production`; `npm run dev` is for source development only. New standalone installs use `~/.owl-runtime` state and `~/.owl` release metadata. Legacy `AGENTOS_*` environment variables remain accepted as compatibility aliases while `OWL_*` is canonical.
 
 ## v0.9 — Primitive & Skill Runtime
 

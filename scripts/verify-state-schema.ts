@@ -9,8 +9,8 @@ const stateRoot = path.join(scratch, "state");
 const futureRoot = path.join(scratch, "future");
 const malformedRoot = path.join(scratch, "malformed");
 
-process.env.AGENTOS_RUNTIME_MODE = "test";
-process.env.AGENTOS_STATE_ROOT = stateRoot;
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = stateRoot;
 
 await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(stateRoot, { recursive: true });

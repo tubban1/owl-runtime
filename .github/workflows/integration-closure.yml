@@ -1,0 +1,110 @@
+name: 1.x Integration Closure Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-integration-closure
+      - feature/1.x-execution-revision
+      - feature/1.x-tested-activation
+      - feature/1.x-approval-resume
+      - feature/1.x-typed-public-dto
+      - feature/1.x-schedule-pause-resume
+      - feature/1.x-storage-foundation
+      - feature/1.x-storage-retention-gc
+      - feature/1.x-storage-legacy-migration
+      - feature/1.x-runtime-integration-freeze
+      - feature/1.x-sqlite-metadata-store
+  pull_request:
+    branches:
+      - feature/1.x-agent-request-events
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-closure-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify Public Runtime Client
+        run: npm run verify:public-runtime-client
+
+      - name: Verify HTTP Runtime Client
+        run: npm run verify:http-runtime-client
+
+      - name: Verify User Skill Registry
+        run: npm run verify:user-skills
+
+      - name: Verify Workflow Discovery
+        run: npm run verify:workflow-discovery
+
+      - name: Verify Public Event Journal
+        run: npm run verify:public-events
+
+      - name: Verify Consequential Request Replay
+        run: npm run verify:request-replay
+
+      - name: Verify Execution Revision
+        run: npm run verify:execution-revision
+
+      - name: Verify Tested Activation
+        run: npm run verify:execution-activation
+
+      - name: Verify Approval Resume
+        run: npm run verify:approval-resume
+
+      - name: Verify Public DTO
+        run: npm run verify:public-dto
+
+      - name: Verify Schedule Pause Resume
+        run: npm run verify:schedule-pause-resume
+
+      - name: Verify Storage Foundation
+        run: npm run verify:storage-foundation
+
+      - name: Verify Storage Retention
+        run: npm run verify:storage-retention
+
+      - name: Verify Legacy Storage Migration
+        run: npm run verify:legacy-storage-migration
+
+      - name: Verify Runtime Integration Freeze
+        run: npm run verify:runtime-integration-freeze
+
+      - name: Verify SQLite Metadata Store
+        run: npm run verify:storage-metadata-sqlite
+
+      - name: Verify Metadata Key Authority
+        run: npm run verify:storage-key-provider
+
+      - name: Verify Encrypted Metadata Store
+        run: npm run verify:encrypted-metadata-store
+
+      - name: Verify Soak Contention Regression
+        run: npm run verify:soak-contention-regression
+
+      - name: Verify MCP Session Reconnect
+        run: npm run verify:mcp-session-reconnect
+
+      - name: Build Public Types
+        run: npm run build:types

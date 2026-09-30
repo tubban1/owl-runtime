@@ -1,0 +1,33 @@
+name: 1.x Storage Retention GC Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-storage-retention-gc
+  pull_request:
+    branches:
+      - feature/1.x-storage-foundation
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-retention-gc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  storage-retention-gc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run verify:storage-foundation
+      - run: npm run verify:storage-retention
+      - run: npm run verify:public-dto
+      - run: npm run build:types

@@ -22,6 +22,7 @@ const filesystemProvider = new StaticProvider("filesystem", "Filesystem", async 
   enabled: configuredRoots().length > 0,
   available: configuredRoots().length > 0,
   capabilities: ["filesystem"],
+  executionTargets: ["host"],
   details: {
     allowedDirectories: configuredRoots(),
     runtimeOwnedDirectories: runtimeOwnedRoots(),
@@ -36,6 +37,7 @@ const shellProvider = new StaticProvider("shell", "Shell", async () => ({
   enabled: envFlag("ALLOW_SHELL", false),
   available: true,
   capabilities: ["shell"],
+  executionTargets: ["host"],
   details: { enabledBy: "ALLOW_SHELL" },
 }));
 
@@ -45,6 +47,7 @@ const gitProvider = new StaticProvider("git", "Git", async () => ({
   enabled: true,
   available: true,
   capabilities: ["git"],
+  executionTargets: ["host"],
   details: {
     push: envFlag("ALLOW_GIT_PUSH", false),
   },
@@ -56,6 +59,7 @@ const transactionProvider = new StaticProvider("transaction", "Transaction", asy
   enabled: envFlag("ALLOW_ROLLBACK", false),
   available: true,
   capabilities: ["transaction"],
+  executionTargets: ["host"],
   details: {
     rollback: envFlag("ALLOW_ROLLBACK", false),
   },

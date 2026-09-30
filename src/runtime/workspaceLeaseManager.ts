@@ -119,14 +119,6 @@ function disconnectedSessionReclaimGraceMs(): number {
   return 5_000;
 }
 
-function idleSessionReclaimMs(): number {
-  const configured = Number(process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS);
-  if (Number.isFinite(configured) && configured >= 0) {
-    return Math.min(Math.trunc(configured), 24 * 60 * 60_000);
-  }
-  return 15 * 60_000;
-}
-
 function staleDisconnectedSessionLease(
   lease: WorkspaceLeaseRecord,
   now = Date.now(),
@@ -144,34 +136,12 @@ function staleDisconnectedSessionLease(
   return now >= disconnectedAt + disconnectedSessionReclaimGraceMs();
 }
 
-function staleIdleSessionLease(
-  lease: WorkspaceLeaseRecord,
-  now = Date.now(),
-): boolean {
-  if (lease.ownerTaskId || lease.pinnedProcessIds.length > 0) return false;
-  if (lease.runtimeInstanceId !== workspaceRuntimeInstanceId) return false;
-
-  const ownerSession = runtimeSessionManager.status(lease.ownerSessionId);
-  if (
-    !ownerSession ||
-    ownerSession.disconnectedAt ||
-    ownerSession.activeCalls > 0
-  ) {
-    return false;
-  }
-
-  const lastActivityAt = Date.parse(ownerSession.lastActivityAt);
-  if (!Number.isFinite(lastActivityAt)) return false;
-  return now >= lastActivityAt + idleSessionReclaimMs();
-}
-
 function expired(lease: WorkspaceLeaseRecord, now = Date.now()): boolean {
   return (
     lease.pinnedProcessIds.length === 0 &&
     (Date.parse(lease.expiresAt) <= now ||
       staleSessionLeaseFromPreviousRuntime(lease) ||
-      staleDisconnectedSessionLease(lease, now) ||
-      staleIdleSessionLease(lease, now))
+      staleDisconnectedSessionLease(lease, now))
   );
 }
 
@@ -681,8 +651,7 @@ export function getWorkspaceLeaseStorageInfo() {
     orphanSessionLeaseReclamation: true,
     sameRuntimeDisconnectedSessionReclamation: true,
     sessionReclaimGraceMs: disconnectedSessionReclaimGraceMs(),
-    staleActiveSessionReclamation: true,
-    sessionIdleReclaimMs: idleSessionReclaimMs(),
+    connectedSessionLeaseReclamation: false,
     hierarchicalWorkspaceConflicts: true,
   };
 }

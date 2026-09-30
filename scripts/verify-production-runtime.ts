@@ -4,6 +4,7 @@ import net from "node:net";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { RUNTIME_VERSION } from "../src/runtime/runtimeVersion.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distServer = path.join(root, "dist", "server.js");
@@ -19,7 +20,7 @@ const installScript = await fs.readFile(
   path.join(root, "scripts", "install-production-runtime.sh"),
   "utf8",
 );
-assert.match(installScript, /AGENTOS_RUNTIME_MODE=production/);
+assert.match(installScript, /OWL_RUNTIME_MODE=production/);
 assert.match(installScript, /Rollback health verified/);
 assert.match(installScript, /Rollback failed health verification/);
 assert.doesNotMatch(installScript, /tsx watch src\/server\.ts/);
@@ -49,8 +50,8 @@ const child = spawn(process.execPath, [distServer], {
   env: {
     ...process.env,
     PORT: String(port),
-    AGENTOS_RUNTIME_MODE: "production",
-    AGENTOS_STATE_ROOT: stateRoot,
+    OWL_RUNTIME_MODE: "production",
+    OWL_STATE_ROOT: stateRoot,
     ALLOWED_DIRECTORIES: root,
     ALLOW_SHELL: "false",
     ALLOW_BROWSER: "false",
@@ -98,8 +99,8 @@ try {
   }
 
   assert.equal(health.ok, true);
-  assert.equal(health.service, "computer-mcp");
-  assert.equal(health.version, "0.9.16");
+  assert.equal(health.service, "owl-runtime");
+  assert.equal(health.version, RUNTIME_VERSION);
   assert.equal(health.runtime?.mode, "production");
   assert.equal(path.resolve(health.runtime?.stateRoot), path.resolve(stateRoot));
   assert.equal(path.resolve(health.runtime?.codeRoot), path.resolve(root));
@@ -126,8 +127,18 @@ try {
   assert.equal(health.runtime?.stateSchema?.readable, true);
   assert.equal(health.runtime?.stateSchema?.migrationRequired, true);
 
-  assert.match(stdout, /computer-mcp v0\.9\.16 listening/);
+  assert.match(stdout, /OWL Runtime .* daemon listening/);
+  assert.doesNotMatch(stdout, /MCP adapter listening/);
   assert.doesNotMatch(stdout, /tsx watch/);
+
+  const mcpProbe = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    signal: AbortSignal.timeout(1_000),
+  });
+  assert.equal(
+    mcpProbe.status,
+    404,
+    "Production OWL Runtime daemon must not require or expose the transitional MCP adapter.",
+  );
 
   console.log(
     JSON.stringify(

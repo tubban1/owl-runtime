@@ -24,6 +24,11 @@ import {
 import { releaseWorkspaceLeasesForTask } from "../runtime/workspaceLeaseManager.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
 import {
+  assertExecutionTargetAvailable,
+  normalizeExecutionTarget,
+  type ExecutionTarget,
+} from "../runtime/executionTarget.js";
+import {
   appendTaskEvent,
   deletePersistentTaskRecord,
   getTaskStorageInfo,
@@ -31,11 +36,53 @@ import {
   readPersistentTask,
   writePersistentTask,
   type PersistentTask,
+  type PersistentTaskProvenance,
   type PersistentTaskStep,
 } from "./taskStore.js";
+import type { Observation } from "../observation/observationAbi.js";
+import {
+  assertExecutionRevisionDigest,
+  createExecutionActivation,
+  createExecutionRevision,
+} from "./executionRevision.js";
+import { buildTaskEvidenceReceipt } from "../runtime/taskEvidence.js";
+import {
+  ApprovalRequiredError,
+  listApprovals,
+  readApproval,
+} from "../policy/approvalPolicy.js";
+import {
+  uncertainVerificationReceipt,
+  verifyObservation,
+  type VerificationReceipt,
+  type VerificationSpec,
+} from "../verification/verifier.js";
+
+type StepExecutionResult =
+  | {
+      id: string;
+      ok: true;
+      provider: string;
+      durationMs: number;
+      observation: Observation | null;
+      verification: VerificationReceipt | null;
+      result: unknown;
+    }
+  | {
+      id: string;
+      ok: false;
+      durationMs: number;
+      error: string;
+      approvalRequired?: {
+        approvalId: string;
+        fingerprint: string;
+        requestedAt: string;
+      };
+    };
 
 const INSTANCE_ID = randomUUID();
 const activeRuns = new Set<string>();
+const detachedRuns = new Map<string, Promise<void>>();
 const controlSignals = new Map<
   string,
   { pauseRequested?: boolean; cancelRequested?: boolean }
@@ -108,12 +155,151 @@ function resolveReferences(
   return value;
 }
 
+function publicStagedArtifactRefs(task: PersistentTask) {
+  return (task.stagedArtifacts ?? [])
+    .map((artifact) => artifact.artifactRef)
+    .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact));
+}
+
+function publicTaskResult(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(publicTaskResult);
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const object = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(object)) {
+    if (
+      key === "staging" &&
+      child &&
+      typeof child === "object" &&
+      !Array.isArray(child)
+    ) {
+      const staging = child as Record<string, unknown>;
+      if (Array.isArray(staging.artifacts)) {
+        const refs = staging.artifacts
+          .map((artifact) => {
+            if (!artifact || typeof artifact !== "object") return null;
+            const internal = artifact as Record<string, unknown>;
+            return internal.artifactRef &&
+              typeof internal.artifactRef === "object" &&
+              !Array.isArray(internal.artifactRef)
+              ? internal.artifactRef
+              : null;
+          })
+          .filter(Boolean);
+        result.staging = {
+          artifacts: refs,
+          legacyUncommittedArtifactCount:
+            staging.artifacts.length - refs.length,
+        };
+        continue;
+      }
+    }
+    result[key] = publicTaskResult(child);
+  }
+  return result;
+}
+
+function publicTaskEvent(
+  event: PersistentTask["events"][number],
+): PersistentTask["events"][number] {
+  if (event.type === "staging_initialized") {
+    return {
+      ...event,
+      message: "Initialized Runtime-owned task staging.",
+    };
+  }
+  if (event.type === "staging_warning") {
+    return {
+      ...event,
+      message:
+        "Step succeeded, but Runtime-owned artifact staging needs attention; inspect diagnostics locally.",
+    };
+  }
+  return event;
+}
+
+function taskProgress(task: PersistentTask) {
+  const counts = {
+    total: task.steps.length,
+    pending: task.steps.filter((step) => step.state === "pending").length,
+    running: task.steps.filter((step) => step.state === "running").length,
+    waitingApproval: task.steps.filter(
+      (step) => step.state === "waiting_approval",
+    ).length,
+    succeeded: task.steps.filter((step) => step.state === "succeeded").length,
+    failed: task.steps.filter((step) => step.state === "failed").length,
+    needsReview: task.steps.filter((step) => step.state === "needs_review").length,
+  };
+  const activeSteps = task.steps
+    .filter((step) => step.state === "running")
+    .map((step) => ({
+      id: step.id,
+      action: step.action,
+      startedAt: step.startedAt ?? null,
+      activeForMs: step.startedAt
+        ? Math.max(0, Date.now() - new Date(step.startedAt).getTime())
+        : null,
+    }));
+  const last = task.events.at(-1);
+  const terminal = ["completed", "failed", "blocked", "cancelled"].includes(
+    task.status,
+  );
+  const phase =
+    task.status === "pending"
+      ? "queued"
+      : task.status === "running"
+        ? activeSteps.length > 0
+          ? "executing"
+          : "starting"
+        : task.status;
+
+  return {
+    schemaVersion: 1 as const,
+    revision: task.progressRevision ?? task.events.length,
+    phase,
+    terminal,
+    counts,
+    activeSteps,
+    lastMeaningfulAt: last?.at ?? task.updatedAt,
+    message:
+      last?.message ??
+      (terminal
+        ? `Task is ${task.status}.`
+        : task.status === "pending"
+          ? "Task is queued."
+          : "Task is still active."),
+    lastEvent: last
+      ? {
+          at: last.at,
+          type: last.type,
+          stepId: last.stepId ?? null,
+          message: publicTaskEvent(last).message,
+        }
+      : null,
+    recommendedPollAfterMs: terminal ? 0 : 3_000,
+  };
+}
+
 function summarizeTask(task: PersistentTask, includeResults = false) {
   return {
+    schemaVersion: 1 as const,
     id: task.id,
     label: task.label,
     status: task.status,
+    progress: taskProgress(task),
     ownerSessionId: task.ownerSessionId ?? null,
+    provenance: task.provenance ?? null,
+    executionRevision: task.executionRevision
+      ? {
+          version: task.executionRevision.version,
+          digest: task.executionRevision.digest,
+        }
+      : null,
+    executionActivation: task.executionActivation ?? null,
+    executionTarget: normalizeExecutionTarget(task.executionTarget),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     runCount: task.runCount,
@@ -130,7 +316,11 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       maxConcurrency: task.defaultMaxConcurrency,
       failFast: task.defaultFailFast,
     },
-    storage: getTaskStorageInfo(),
+    storage: {
+      encryptedAtRest: getTaskStorageInfo().encryptedAtRest,
+      algorithm: getTaskStorageInfo().algorithm,
+      internalPathsExposed: false as const,
+    },
     memoryLayers: {
       working: {
         description:
@@ -139,13 +329,13 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       },
       staging: {
         description:
-          "File-backed intermediate asset staging for task artifacts.",
-        root: task.stagingRoot ?? null,
-        manifestPath: task.stagingManifestPath ?? null,
+          "Runtime-owned mutable staging with immutable CAS-backed ArtifactRef identity.",
         artifactCount: task.stagedArtifacts?.length ?? 0,
+        committedArtifactCount: publicStagedArtifactRefs(task).length,
         bytes:
           task.stagedArtifacts?.reduce((sum, artifact) => sum + artifact.bytes, 0) ??
           0,
+        internalPathsExposed: false as const,
       },
       episodic: {
         description:
@@ -161,10 +351,12 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       },
     },
     staging: {
-      root: task.stagingRoot ?? null,
-      manifestPath: task.stagingManifestPath ?? null,
       artifactCount: task.stagedArtifacts?.length ?? 0,
-      artifacts: task.stagedArtifacts ?? [],
+      committedArtifactCount: publicStagedArtifactRefs(task).length,
+      legacyUncommittedArtifactCount:
+        (task.stagedArtifacts?.length ?? 0) - publicStagedArtifactRefs(task).length,
+      artifacts: publicStagedArtifactRefs(task),
+      internalPathsExposed: false as const,
     },
     steps: task.steps.map((step) => ({
       id: step.id,
@@ -178,6 +370,13 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       riskLevel: step.riskLevel ?? null,
       sideEffects: step.sideEffects ?? [],
       requiresVerification: step.requiresVerification ?? false,
+      verificationSpec: step.verificationSpec
+        ? {
+            id: step.verificationSpec.id,
+            description: step.verificationSpec.description ?? null,
+            expectations: step.verificationSpec.expectations,
+          }
+        : null,
       resources: step.resources ?? [],
       state: step.state,
       attempts: step.attempts,
@@ -186,9 +385,37 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       completedAt: step.completedAt ?? null,
       error: step.error ?? null,
       recoveryNote: step.recoveryNote ?? null,
-      ...(includeResults ? { result: step.result ?? null } : {}),
+      approval: step.approvalId
+        ? {
+            id: step.approvalId,
+            fingerprint: step.approvalFingerprint ?? null,
+            requestedAt: step.approvalRequestedAt ?? null,
+          }
+        : null,
+      observation: step.observation
+        ? {
+            schemaVersion: 1 as const,
+            id: step.observation.observationId,
+            channel: step.observation.channel,
+            provider: step.observation.provider,
+            state: step.observation.state,
+            evidenceCount: step.observation.evidence.length,
+          }
+        : null,
+      verification: step.verification
+        ? {
+            schemaVersion: 1 as const,
+            id: step.verification.verificationId,
+            specId: step.verification.specId,
+            status: step.verification.status,
+            checkedAt: step.verification.checkedAt,
+          }
+        : null,
+      ...(includeResults
+        ? { result: publicTaskResult(step.result ?? null) }
+        : {}),
     })),
-    events: task.events.slice(-100),
+    events: task.events.slice(-100).map(publicTaskEvent),
   };
 }
 
@@ -209,12 +436,36 @@ async function recoverInterruptedTask(task: PersistentTask): Promise<PersistentT
   if (!isOtherRuntime) return task;
 
   let needsReview = false;
+  let waitingApproval = false;
   let recovered = false;
+  const approvals = await listApprovals();
 
   for (const step of task.steps) {
     if (step.state !== "running") continue;
 
     recovered = true;
+    const pendingApproval = approvals.find(
+      (approval) =>
+        approval.ownerTaskId === task.id &&
+        approval.ownerStepId === step.id &&
+        (approval.state === "pending" || approval.state === "approved"),
+    );
+    if (pendingApproval) {
+      step.state = "waiting_approval";
+      step.approvalId = pendingApproval.id;
+      step.approvalFingerprint = pendingApproval.fingerprint;
+      step.approvalRequestedAt = pendingApproval.requestedAt;
+      waitingApproval = true;
+      step.recoveryNote =
+        "Recovered an approval boundary after Runtime restart; no action side effect is retried until the exact approval is consumed.";
+      appendTaskEvent(task, {
+        type: "step_waiting_approval_recovered",
+        stepId: step.id,
+        message: `Recovered pending approval ${pendingApproval.id} for ${step.id}.`,
+      });
+      continue;
+    }
+
     const retryPolicy =
       step.retryPolicy ?? (step.parallelSafe ? "automatic" : "manual");
 
@@ -241,7 +492,11 @@ async function recoverInterruptedTask(task: PersistentTask): Promise<PersistentT
   }
 
   if (recovered) {
-    task.status = needsReview ? "blocked" : "paused";
+    task.status = needsReview
+      ? "blocked"
+      : waitingApproval
+        ? "waiting_approval"
+        : "paused";
     task.runnerInstanceId = undefined;
     task.runnerPid = undefined;
     task.pauseRequested = false;
@@ -253,7 +508,9 @@ async function recoverInterruptedTask(task: PersistentTask): Promise<PersistentT
       type: "runtime_recovery",
       message: needsReview
         ? "Recovered after server restart; at least one interrupted state-changing step needs review."
-        : "Recovered after server restart; interrupted parallel-safe work can be resumed.",
+        : waitingApproval
+          ? "Recovered after server restart at an exact approval boundary."
+          : "Recovered after server restart; interrupted parallel-safe work can be resumed.",
     });
 
     await writePersistentTask(task);
@@ -271,7 +528,7 @@ async function loadTask(id: string): Promise<PersistentTask> {
     task.stagingRoot = stage.root;
     appendTaskEvent(task, {
       type: "staging_initialized",
-      message: `Initialized task staging at ${stage.root}.`,
+      message: "Initialized Runtime-owned task staging.",
     });
     changed = true;
   }
@@ -303,12 +560,19 @@ export type PrimitiveTaskStep = {
   op: string;
   args?: Record<string, unknown>;
   dependsOn?: string[];
+  verify?: VerificationSpec;
 };
 
 export async function createPersistentTask(
   label: string,
   steps: GraphStep[],
-  options?: { maxConcurrency?: number; failFast?: boolean },
+  options?: {
+    maxConcurrency?: number;
+    failFast?: boolean;
+    executionTarget?: ExecutionTarget;
+    expectedRevisionDigest?: string;
+    provenance?: PersistentTaskProvenance;
+  },
 ) {
   const plan = planActionGraph(steps);
   const validationErrors = plan.filter((step) => step.validationError);
@@ -320,6 +584,25 @@ export async function createPersistentTask(
     );
   }
 
+  const executionTarget = assertExecutionTargetAvailable(
+    options?.executionTarget ?? currentExecutionContext().executionTarget,
+  );
+  const normalizedMaxConcurrency = Math.min(
+    Math.max(options?.maxConcurrency ?? 4, 1),
+    8,
+  );
+  const normalizedFailFast = options?.failFast ?? true;
+  const executionRevision = createExecutionRevision({
+    label,
+    steps,
+    maxConcurrency: normalizedMaxConcurrency,
+    failFast: normalizedFailFast,
+    executionTarget,
+  });
+  assertExecutionRevisionDigest(
+    executionRevision.digest,
+    options?.expectedRevisionDigest,
+  );
   const now = new Date().toISOString();
   const id = newTaskId();
   const stage = await ensureTaskStage(id);
@@ -329,14 +612,14 @@ export async function createPersistentTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    provenance: options?.provenance,
+    executionRevision,
+    executionTarget,
     createdAt: now,
     updatedAt: now,
     status: "pending",
-    defaultMaxConcurrency: Math.min(
-      Math.max(options?.maxConcurrency ?? 4, 1),
-      8,
-    ),
-    defaultFailFast: options?.failFast ?? true,
+    defaultMaxConcurrency: normalizedMaxConcurrency,
+    defaultFailFast: normalizedFailFast,
     runCount: 0,
     pauseRequested: false,
     cancelRequested: false,
@@ -357,7 +640,9 @@ export async function createPersistentTask(
         retryPolicy: planned.contract.retryPolicy,
         riskLevel: planned.contract.riskLevel,
         sideEffects: planned.contract.sideEffects,
-        requiresVerification: planned.contract.requiresVerification,
+        requiresVerification:
+          planned.contract.requiresVerification || Boolean(step.verify),
+        verificationSpec: step.verify,
         resources: planned.contract.resources,
         state: "pending",
         attempts: 0,
@@ -372,7 +657,7 @@ export async function createPersistentTask(
   });
   appendTaskEvent(task, {
     type: "staging_initialized",
-    message: `Initialized task staging at ${stage.root}.`,
+    message: "Initialized Runtime-owned task staging.",
   });
 
   await writePersistentTask(task);
@@ -405,6 +690,7 @@ export function validatePrimitiveTaskSteps(
       action: routed.routedAction,
       args: step.args ?? {},
       dependsOn: step.dependsOn,
+      verify: step.verify,
     };
   });
 
@@ -427,9 +713,36 @@ export async function createPersistentPrimitiveTask(
     maxConcurrency?: number;
     failFast?: boolean;
     taskId?: string;
+    executionTarget?: ExecutionTarget;
+    provenance?: PersistentTaskProvenance;
   },
 ) {
   const plan = validatePrimitiveTaskSteps(steps);
+  const executionTarget = assertExecutionTargetAvailable(
+    options?.executionTarget ?? currentExecutionContext().executionTarget,
+  );
+  const normalizedMaxConcurrency = Math.min(
+    Math.max(options?.maxConcurrency ?? 4, 1),
+    8,
+  );
+  const normalizedFailFast = options?.failFast ?? true;
+  const revisionSteps = steps.map((step) => {
+    const routed = routePrimitive(step.primitive, step.op, step.args ?? {});
+    return {
+      id: step.id,
+      action: routed.routedAction,
+      args: step.args ?? {},
+      dependsOn: step.dependsOn,
+      verify: step.verify,
+    };
+  });
+  const executionRevision = createExecutionRevision({
+    label,
+    steps: revisionSteps,
+    maxConcurrency: normalizedMaxConcurrency,
+    failFast: normalizedFailFast,
+    executionTarget,
+  });
 
   const now = new Date().toISOString();
   const id = options?.taskId ?? newTaskId();
@@ -440,14 +753,14 @@ export async function createPersistentPrimitiveTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    provenance: options?.provenance,
+    executionRevision,
+    executionTarget,
     createdAt: now,
     updatedAt: now,
     status: "pending",
-    defaultMaxConcurrency: Math.min(
-      Math.max(options?.maxConcurrency ?? 4, 1),
-      8,
-    ),
-    defaultFailFast: options?.failFast ?? true,
+    defaultMaxConcurrency: normalizedMaxConcurrency,
+    defaultFailFast: normalizedFailFast,
     runCount: 0,
     pauseRequested: false,
     cancelRequested: false,
@@ -471,7 +784,9 @@ export async function createPersistentPrimitiveTask(
         retryPolicy: planned.contract.retryPolicy,
         riskLevel: planned.contract.riskLevel,
         sideEffects: planned.contract.sideEffects,
-        requiresVerification: planned.contract.requiresVerification,
+        requiresVerification:
+          planned.contract.requiresVerification || Boolean(step.verify),
+        verificationSpec: step.verify,
         resources: planned.contract.resources,
         state: "pending",
         attempts: 0,
@@ -486,7 +801,7 @@ export async function createPersistentPrimitiveTask(
   });
   appendTaskEvent(task, {
     type: "staging_initialized",
-    message: `Initialized task staging at ${stage.root}.`,
+    message: "Initialized Runtime-owned task staging.",
   });
 
   await writePersistentTask(task);
@@ -499,9 +814,11 @@ export async function listPersistentTasks() {
   for (const task of tasks) recovered.push(await recoverInterruptedTask(task));
 
   return recovered.map((task) => ({
+    schemaVersion: 1 as const,
     id: task.id,
     label: task.label,
     status: task.status,
+    progress: taskProgress(task),
     ownerSessionId: task.ownerSessionId ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -510,6 +827,9 @@ export async function listPersistentTasks() {
       total: task.steps.length,
       pending: task.steps.filter((step) => step.state === "pending").length,
       running: task.steps.filter((step) => step.state === "running").length,
+      waitingApproval: task.steps.filter(
+        (step) => step.state === "waiting_approval",
+      ).length,
       succeeded: task.steps.filter((step) => step.state === "succeeded").length,
       failed: task.steps.filter((step) => step.state === "failed").length,
       needsReview: task.steps.filter((step) => step.state === "needs_review").length,
@@ -531,6 +851,11 @@ export async function deletePersistentTask(id: string) {
   }
 
   const task = await loadTask(id);
+  if (task.executionActivation) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_DELETE_BLOCKED: activated test evidence is durable execution authority and cannot be deleted.",
+    );
+  }
   if (task.status === "running") {
     throw new Error("Cannot delete a task that is still marked running.");
   }
@@ -538,14 +863,143 @@ export async function deletePersistentTask(id: string) {
   await deletePersistentTaskRecord(id);
   controlSignals.delete(id);
   return {
+    schemaVersion: 1 as const,
     id,
     label: task.label,
     previousStatus: task.status,
-    deleted: true,
+    deleted: true as const,
     stagingPreserved: true,
     stagingRoot: task.stagingRoot ?? null,
     stagedArtifactCount: task.stagedArtifacts?.length ?? 0,
   };
+}
+
+export async function activatePersistentExecutionRevision(input: {
+  testTaskId: string;
+  expectedRevisionDigest: string;
+  confirm: boolean;
+}) {
+  if (!input.confirm) {
+    throw new Error("EXECUTION_ACTIVATION_CONFIRM_REQUIRED");
+  }
+  const task = await loadTask(input.testTaskId);
+  assertExecutionRevisionDigest(
+    task.executionRevision?.digest,
+    input.expectedRevisionDigest,
+  );
+  if (!task.executionRevision) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_REVISION_MISSING: test task predates Execution Revision v1 and must be re-tested.",
+    );
+  }
+  if (task.executionActivation) {
+    if (
+      task.executionActivation.revisionDigest !== input.expectedRevisionDigest
+    ) {
+      throw new Error(
+        "STALE_TEST_EVIDENCE: existing activation belongs to a different execution revision.",
+      );
+    }
+    return {
+      idempotent: true,
+      activation: task.executionActivation,
+      executionRevision: {
+        version: task.executionRevision.version,
+        digest: task.executionRevision.digest,
+      },
+    };
+  }
+  if (task.status !== "completed") {
+    throw new Error(
+      "EXECUTION_ACTIVATION_TEST_NOT_COMPLETED: test task must complete before activation.",
+    );
+  }
+
+  const evidence = buildTaskEvidenceReceipt(
+    task,
+    task.steps.map((step) => step.id),
+  );
+  if (
+    !evidence.allStepsSucceeded ||
+    !evidence.verification.allRequiredVerified ||
+    evidence.sideEffects.unresolvedStepIds.length > 0
+  ) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_EVIDENCE_UNRESOLVED: tested revision lacks complete verified evidence.",
+    );
+  }
+
+  const activation = createExecutionActivation({
+    revisionDigest: task.executionRevision.digest,
+    testTaskId: task.id,
+    evidenceDigest: evidence.evidenceDigest,
+  });
+  task.executionActivation = activation;
+  appendTaskEvent(task, {
+    type: "execution_revision_activated",
+    message:
+      "Activated tested execution revision " +
+      task.executionRevision.digest +
+      " with evidence " +
+      evidence.evidenceDigest +
+      ".",
+  });
+  await writePersistentTask(task);
+  return {
+    idempotent: false,
+    activation,
+    executionRevision: {
+      version: task.executionRevision.version,
+      digest: task.executionRevision.digest,
+    },
+    evidence,
+  };
+}
+
+export async function createPersistentTaskFromActivation(input: {
+  testTaskId: string;
+  expectedRevisionDigest: string;
+}) {
+  const testTask = await loadTask(input.testTaskId);
+  const activation = testTask.executionActivation;
+  if (!activation || !testTask.executionRevision) {
+    throw new Error(
+      "EXECUTION_ACTIVATION_NOT_FOUND: test task has no active tested revision.",
+    );
+  }
+  if (
+    activation.revisionDigest !== input.expectedRevisionDigest ||
+    testTask.executionRevision.digest !== input.expectedRevisionDigest
+  ) {
+    throw new Error(
+      "STALE_TEST_EVIDENCE: activation does not match the requested execution revision.",
+    );
+  }
+
+  const revision = testTask.executionRevision;
+  const activatedSteps: GraphStep[] = revision.canonical.steps.map((step) => ({
+    id: step.id,
+    action: step.action,
+    args: step.args,
+    dependsOn: step.dependsOn,
+    verify: step.verify as VerificationSpec | undefined,
+  }));
+  return await createPersistentTask(
+    revision.canonical.label,
+    activatedSteps,
+    {
+      maxConcurrency: revision.canonical.maxConcurrency,
+      failFast: revision.canonical.failFast,
+      executionTarget: revision.canonical.executionTarget,
+      expectedRevisionDigest: revision.digest,
+      provenance: {
+        kind: "activated_revision",
+        activationId: activation.id,
+        testTaskId: testTask.id,
+        revisionDigest: revision.digest,
+      },
+    },
+  );
 }
 
 export async function getPersistentTaskStatus(
@@ -553,6 +1007,121 @@ export async function getPersistentTaskStatus(
   includeResults = false,
 ) {
   return summarizeTask(await loadTask(id), includeResults);
+}
+
+async function recordDetachedRunFailure(id: string, error: unknown) {
+  try {
+    const task = await loadTask(id);
+    if (["completed", "failed", "blocked", "cancelled"].includes(task.status)) {
+      return;
+    }
+    task.status = "failed";
+    task.runnerInstanceId = undefined;
+    task.runnerPid = undefined;
+    appendTaskEvent(task, {
+      type: "detached_run_failed",
+      message:
+        "Detached task execution failed: " +
+        (error instanceof Error ? error.message : String(error)),
+    });
+    await writePersistentTask(task);
+  } catch {
+    // The original detached-run error remains authoritative if recovery also fails.
+  }
+}
+
+export async function startPersistentTask(
+  id: string,
+  options?: {
+    maxConcurrency?: number;
+    failFast?: boolean;
+    maxWaves?: number;
+    timeBudgetMs?: number;
+    expectedRevisionDigest?: string;
+  },
+) {
+  if (activeRuns.has(id) || detachedRuns.has(id)) {
+    const current = await getPersistentTaskStatus(id, false);
+    return {
+      schemaVersion: 1 as const,
+      id,
+      accepted: true as const,
+      alreadyRunning: true as const,
+      acceptedAt: new Date().toISOString(),
+      status: current.status,
+      progress: current.progress,
+    };
+  }
+
+  const task = await loadTask(id);
+  assertExecutionRevisionDigest(
+    task.executionRevision?.digest,
+    options?.expectedRevisionDigest,
+  );
+
+  // Two transport requests can race across the initial durable read. Re-check
+  // in-memory ownership after that await so only one detached runner is created.
+  if (activeRuns.has(id) || detachedRuns.has(id)) {
+    const current = await getPersistentTaskStatus(id, false);
+    return {
+      schemaVersion: 1 as const,
+      id,
+      accepted: true as const,
+      alreadyRunning: true as const,
+      acceptedAt: new Date().toISOString(),
+      status: current.status,
+      progress: current.progress,
+    };
+  }
+
+  if (task.status === "completed") {
+    return {
+      schemaVersion: 1 as const,
+      id,
+      accepted: false as const,
+      alreadyRunning: false as const,
+      alreadyCompleted: true as const,
+      acceptedAt: new Date().toISOString(),
+      status: task.status,
+      progress: taskProgress(task),
+    };
+  }
+  if (task.status === "cancelled") {
+    throw new Error("Cancelled tasks cannot be resumed.");
+  }
+  const unresolved = task.steps.filter((step) => step.state === "needs_review");
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Task is blocked by interrupted state-changing step(s): ${unresolved
+        .map((step) => step.id)
+        .join(", ")}. Use task_resolve_step first.`,
+    );
+  }
+
+  const acceptedAt = new Date().toISOString();
+  const run = Promise.resolve()
+    .then(async () => {
+      await runPersistentTask(id, options);
+    })
+    .catch(async (error) => {
+      await recordDetachedRunFailure(id, error);
+    })
+    .finally(() => {
+      detachedRuns.delete(id);
+    });
+  detachedRuns.set(id, run);
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const current = await getPersistentTaskStatus(id, false);
+  return {
+    schemaVersion: 1 as const,
+    id,
+    accepted: true as const,
+    alreadyRunning: false as const,
+    acceptedAt,
+    status: current.status,
+    progress: current.progress,
+  };
 }
 
 export async function requestTaskPause(id: string) {
@@ -640,6 +1209,8 @@ export async function resolvePersistentTaskStep(
     step.durationMs = undefined;
     step.error = undefined;
     step.result = undefined;
+    step.observation = undefined;
+    step.verification = undefined;
     step.recoveryNote = undefined;
     appendTaskEvent(task, {
       type: "step_retry",
@@ -651,6 +1222,7 @@ export async function resolvePersistentTaskStep(
     step.completedAt = new Date().toISOString();
     step.error = undefined;
     step.result = result;
+    step.verification = undefined;
     step.recoveryNote = "Manually marked succeeded after review.";
     appendTaskEvent(task, {
       type: "step_marked_succeeded",
@@ -675,8 +1247,118 @@ function chooseStatusAfterRun(task: PersistentTask): PersistentTask["status"] {
   if (task.cancelRequested) return "cancelled";
   if (task.steps.every((step) => step.state === "succeeded")) return "completed";
   if (task.steps.some((step) => step.state === "needs_review")) return "blocked";
+  if (task.steps.some((step) => step.state === "waiting_approval")) {
+    return "waiting_approval";
+  }
   if (task.steps.some((step) => step.state === "failed")) return "failed";
   return "paused";
+}
+
+export async function resumePersistentTaskAfterApproval(
+  taskId: string,
+  approvalId: string,
+) {
+  if (activeRuns.has(taskId)) {
+    throw new Error(
+      "APPROVAL_RESUME_TASK_ACTIVE: task is still executing; retry reconciliation after the current run settles.",
+    );
+  }
+  const approval = await readApproval(approvalId);
+  if (approval.state !== "approved") {
+    throw new Error(
+      "APPROVAL_RESUME_NOT_APPROVED: approval must be approved before Runtime resumes execution.",
+    );
+  }
+  if (approval.ownerTaskId !== taskId || !approval.ownerStepId) {
+    throw new Error(
+      "APPROVAL_RESUME_OWNER_MISMATCH: approval is not bound to this task step.",
+    );
+  }
+
+  const task = await loadTask(taskId);
+  const step = task.steps.find(
+    (item) =>
+      item.id === approval.ownerStepId &&
+      item.state === "waiting_approval" &&
+      item.approvalId === approval.id &&
+      item.approvalFingerprint === approval.fingerprint,
+  );
+  if (!step) {
+    throw new Error(
+      "APPROVAL_RESUME_STEP_MISMATCH: task is not waiting on this exact approval receipt.",
+    );
+  }
+
+  step.state = "pending";
+  step.recoveryNote = undefined;
+  task.status = task.steps.some((item) => item.state === "needs_review")
+    ? "blocked"
+    : "paused";
+  appendTaskEvent(task, {
+    type: "approval_resume_authorized",
+    stepId: step.id,
+    message:
+      `Approval ${approval.id} authorized resume of the same task/step execution.`,
+  });
+  await writePersistentTask(task);
+
+  if (task.status === "blocked") {
+    return {
+      resumed: false,
+      taskId,
+      stepId: step.id,
+      approvalId,
+      reason: "OTHER_STEP_NEEDS_REVIEW",
+      task: summarizeTask(task, false),
+    };
+  }
+
+  const result = await runPersistentTask(taskId, {
+    expectedRevisionDigest: task.executionRevision?.digest,
+  });
+  return {
+    resumed: true,
+    taskId,
+    stepId: step.id,
+    approvalId,
+    result,
+  };
+}
+
+export async function failPersistentTaskAfterApprovalDenial(
+  taskId: string,
+  approvalId: string,
+) {
+  if (activeRuns.has(taskId)) {
+    throw new Error(
+      "APPROVAL_DENIAL_TASK_ACTIVE: task is still executing; retry reconciliation after the current run settles.",
+    );
+  }
+  const approval = await readApproval(approvalId);
+  if (approval.state !== "denied") {
+    throw new Error("APPROVAL_DENIAL_STATE_INVALID");
+  }
+  const task = await loadTask(taskId);
+  const step = task.steps.find(
+    (item) =>
+      item.id === approval.ownerStepId &&
+      item.state === "waiting_approval" &&
+      item.approvalId === approval.id,
+  );
+  if (!step) {
+    throw new Error("APPROVAL_DENIAL_STEP_MISMATCH");
+  }
+  step.state = "failed";
+  step.error = "APPROVAL_DENIED: " + approval.id;
+  step.completedAt = new Date().toISOString();
+  task.status = "failed";
+  appendTaskEvent(task, {
+    type: "approval_denied",
+    stepId: step.id,
+    message: `Approval ${approval.id} was denied; the waiting execution terminated without the side effect.`,
+  });
+  await writePersistentTask(task);
+  return summarizeTask(task, false);
 }
 
 export async function runPersistentTask(
@@ -686,6 +1368,7 @@ export async function runPersistentTask(
     failFast?: boolean;
     maxWaves?: number;
     timeBudgetMs?: number;
+    expectedRevisionDigest?: string;
   },
 ) {
   if (activeRuns.has(id)) {
@@ -693,11 +1376,29 @@ export async function runPersistentTask(
   }
 
   let task = await loadTask(id);
+  assertExecutionRevisionDigest(
+    task.executionRevision?.digest,
+    options?.expectedRevisionDigest,
+  );
   if (task.status === "completed") {
     await indexTaskEpisode(task).catch(() => undefined);
     return {
+      schemaVersion: 1 as const,
+      id: task.id,
+      label: task.label,
+      status: task.status,
+      runCount: task.runCount,
+      wavesExecuted: 0,
+      runDurationMs: 0,
+      runResults: [],
+      executionRevision: task.executionRevision
+        ? {
+            version: task.executionRevision.version,
+            digest: task.executionRevision.digest,
+          }
+        : null,
+      summary: summarizeTask(task, true),
       alreadyCompleted: true,
-      ...summarizeTask(task, true),
     };
   }
   if (task.status === "cancelled") {
@@ -733,6 +1434,7 @@ export async function runPersistentTask(
           task.ownerSessionId ?? currentExecutionContext().sessionId,
         taskId: task.id,
         origin: "task",
+        executionTarget: normalizeExecutionTarget(task.executionTarget),
       },
     },
   );
@@ -875,14 +1577,16 @@ export async function runPersistentTask(
 
       await writePersistentTask(task);
 
-      const results = await Promise.all(
-        wave.map(async (step) =>
+      const results: StepExecutionResult[] = await Promise.all(
+        wave.map(async (step): Promise<StepExecutionResult> =>
           await withChildExecutionContext(
             {
               sessionId:
                 task.ownerSessionId ?? currentExecutionContext().sessionId,
               origin: "task",
               taskId: task.id,
+              stepId: step.id,
+              executionTarget: normalizeExecutionTarget(task.executionTarget),
             },
             async () => {
               const stepStartedAt = Date.now();
@@ -912,6 +1616,8 @@ export async function runPersistentTask(
                     ok: true as const,
                     provider: executed.provider,
                     durationMs: Date.now() - stepStartedAt,
+                    observation: executed.observation,
+                    verification: executed.verification,
                     result: executed.result,
                   };
                 }
@@ -926,9 +1632,24 @@ export async function runPersistentTask(
                   ok: true as const,
                   provider: executed.provider,
                   durationMs: Date.now() - stepStartedAt,
+                  observation: executed.observation,
+                  verification: executed.verification,
                   result: executed.result,
                 };
               } catch (error) {
+                if (error instanceof ApprovalRequiredError) {
+                  return {
+                    id: step.id,
+                    ok: false as const,
+                    durationMs: Date.now() - stepStartedAt,
+                    error: error.message,
+                    approvalRequired: {
+                      approvalId: error.approval.id,
+                      fingerprint: error.approval.fingerprint,
+                      requestedAt: error.approval.requestedAt,
+                    },
+                  };
+                }
                 return {
                   id: step.id,
                   ok: false as const,
@@ -974,53 +1695,112 @@ export async function runPersistentTask(
         step.completedAt = new Date().toISOString();
 
         if (result.ok) {
-          step.state = "succeeded";
           step.result = result.result;
+          step.observation = result.observation ?? undefined;
+          const verification = step.verificationSpec
+            ? result.observation
+              ? verifyObservation(result.observation, step.verificationSpec)
+              : uncertainVerificationReceipt(
+                  step.verificationSpec,
+                  `No Observation was produced for ${step.action}; explicit postconditions cannot be evaluated safely.`,
+                )
+            : result.verification;
+          step.verification = verification ?? undefined;
           step.error = undefined;
-          appendTaskEvent(task, {
-            type: "step_succeeded",
-            stepId: step.id,
-            message: `${step.action} succeeded in ${result.durationMs} ms.`,
-          });
 
-          try {
-            const staged = await stageArtifactsFromResult(
-              task.id,
-              step.id,
-              result.result,
-              task.stagedArtifacts ?? [],
-            );
-            if (staged.length > 0) {
-              task.stagedArtifacts = [...(task.stagedArtifacts ?? []), ...staged];
-              if (
-                step.result &&
-                typeof step.result === "object" &&
-                !Array.isArray(step.result)
-              ) {
-                step.result = {
-                  ...(step.result as Record<string, unknown>),
-                  staging: {
-                    artifacts: staged,
-                  },
-                };
-              }
-              for (const artifact of staged) {
-                appendTaskEvent(task, {
-                  type: "artifact_staged",
-                  stepId: step.id,
-                  message: `Staged ${artifact.filename} (${artifact.bytes} bytes).`,
-                });
-              }
-            }
-          } catch (error) {
+          const verificationNeedsReview =
+            Boolean(step.requiresVerification) &&
+            Boolean(verification) &&
+            verification?.status !== "verified";
+
+          if (verificationNeedsReview) {
+            step.state = "needs_review";
+            step.recoveryNote =
+              `Postcondition verification returned ${verification?.status}; review evidence before retrying or marking the step succeeded.`;
             appendTaskEvent(task, {
-              type: "staging_warning",
+              type: "step_verification_review",
               stepId: step.id,
               message:
-                "Step succeeded, but artifact staging failed: " +
-                (error instanceof Error ? error.message : String(error)),
+                `${step.action} executed, but verification is ${verification?.status}; task is blocked for review.`,
+            });
+          } else {
+            step.state = "succeeded";
+            if (verification?.status === "verified") {
+              appendTaskEvent(task, {
+                type: "step_verified",
+                stepId: step.id,
+                message: `${step.action} postconditions verified.`,
+              });
+            } else if (step.requiresVerification && !verification) {
+              appendTaskEvent(task, {
+                type: "step_verification_unavailable",
+                stepId: step.id,
+                message:
+                  `${step.action} requires verification by contract, but no default verifier is wired yet; compatibility behavior accepted the action result.`,
+              });
+            }
+            appendTaskEvent(task, {
+              type: "step_succeeded",
+              stepId: step.id,
+              message: `${step.action} succeeded in ${result.durationMs} ms.`,
             });
           }
+
+          if (step.state === "succeeded") {
+            try {
+              const staged = await stageArtifactsFromResult(
+                task.id,
+                step.id,
+                result.result,
+                task.stagedArtifacts ?? [],
+              );
+              if (staged.length > 0) {
+                task.stagedArtifacts = [...(task.stagedArtifacts ?? []), ...staged];
+                if (
+                  step.result &&
+                  typeof step.result === "object" &&
+                  !Array.isArray(step.result)
+                ) {
+                  step.result = {
+                    ...(step.result as Record<string, unknown>),
+                    staging: {
+                      artifacts: staged,
+                    },
+                  };
+                }
+                for (const artifact of staged) {
+                  appendTaskEvent(task, {
+                    type: "artifact_staged",
+                    stepId: step.id,
+                    message: `Staged ${artifact.filename} (${artifact.bytes} bytes).`,
+                  });
+                }
+              }
+            } catch (error) {
+              appendTaskEvent(task, {
+                type: "staging_warning",
+                stepId: step.id,
+                message:
+                  "Step succeeded, but artifact staging failed: " +
+                  (error instanceof Error ? error.message : String(error)),
+              });
+            }
+          }
+        } else if (result.approvalRequired) {
+          step.state = "waiting_approval";
+          step.completedAt = undefined;
+          step.error = undefined;
+          step.result = undefined;
+          step.approvalId = result.approvalRequired.approvalId;
+          step.approvalFingerprint = result.approvalRequired.fingerprint;
+          step.approvalRequestedAt = result.approvalRequired.requestedAt;
+          task.status = "waiting_approval";
+          appendTaskEvent(task, {
+            type: "step_waiting_approval",
+            stepId: step.id,
+            message:
+              `${step.action} is waiting for exact approval ${result.approvalRequired.approvalId}; no side effect executed.`,
+          });
         } else {
           step.state = "failed";
           step.error = result.error;
@@ -1039,7 +1819,12 @@ export async function runPersistentTask(
           durationMs: result.durationMs,
           ...(result.ok
             ? { result: result.result }
-            : { error: result.error }),
+            : result.approvalRequired
+              ? {
+                  waitingApproval: true,
+                  approvalId: result.approvalRequired.approvalId,
+                }
+              : { error: result.error }),
         });
       }
 
@@ -1052,6 +1837,15 @@ export async function runPersistentTask(
       });
 
       await writePersistentTask(task);
+
+      if (results.some((result) => !result.ok && result.approvalRequired)) {
+        task.status = "waiting_approval";
+        appendTaskEvent(task, {
+          type: "run_waiting_approval",
+          message: "Execution paused at an approval boundary and will resume on the same Task after approval.",
+        });
+        break;
+      }
 
       if (
         failFast &&
@@ -1072,6 +1866,8 @@ export async function runPersistentTask(
     if (task.status === "completed") {
       task.completedAt ??= new Date().toISOString();
     } else if (task.status === "paused") {
+      task.pausedAt ??= new Date().toISOString();
+    } else if (task.status === "waiting_approval") {
       task.pausedAt ??= new Date().toISOString();
     } else if (task.status === "blocked") {
       task.blockedAt ??= new Date().toISOString();
@@ -1120,6 +1916,7 @@ export async function runPersistentTask(
     await writePersistentTask(task);
 
     return {
+      schemaVersion: 1 as const,
       id: task.id,
       label: task.label,
       status: task.status,
@@ -1127,6 +1924,12 @@ export async function runPersistentTask(
       wavesExecuted,
       runDurationMs: Date.now() - runStartedAt,
       runResults,
+      executionRevision: task.executionRevision
+        ? {
+            version: task.executionRevision.version,
+            digest: task.executionRevision.digest,
+          }
+        : null,
       summary: summarizeTask(task, false),
     };
   } finally {

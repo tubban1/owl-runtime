@@ -231,6 +231,14 @@ export async function readMultipleFiles(paths: string[]) {
   );
 }
 
+export type DirectoryTreeNode = {
+  name: string;
+  path: string;
+  type: "directory" | "file" | "other";
+  children?: DirectoryTreeNode[];
+  truncated?: number;
+};
+
 export async function listDirectoryTree(
   inputPath: string,
   depth = 2,
@@ -240,28 +248,23 @@ export async function listDirectoryTree(
   const maxDepth = Math.min(Math.max(depth, 1), 8);
   const perDirectory = Math.min(Math.max(maxEntriesPerDirectory, 1), 500);
 
-  type TreeNode = {
-    name: string;
-    path: string;
-    type: "directory" | "file" | "other";
-    children?: TreeNode[];
-    truncated?: number;
-  };
-
-  async function walk(dir: string, currentDepth: number): Promise<TreeNode[]> {
+  async function walk(
+    dir: string,
+    currentDepth: number,
+  ): Promise<DirectoryTreeNode[]> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const visible = entries.slice(0, perDirectory);
-    const nodes: TreeNode[] = [];
+    const nodes: DirectoryTreeNode[] = [];
 
     for (const entry of visible) {
       if (entry.isSymbolicLink()) continue;
       const fullPath = path.join(dir, entry.name);
-      const type: TreeNode["type"] = entry.isDirectory()
+      const type: DirectoryTreeNode["type"] = entry.isDirectory()
         ? "directory"
         : entry.isFile()
           ? "file"
           : "other";
-      const node: TreeNode = { name: entry.name, path: fullPath, type };
+      const node: DirectoryTreeNode = { name: entry.name, path: fullPath, type };
 
       if (entry.isDirectory() && currentDepth < maxDepth) {
         node.children = await walk(fullPath, currentDepth + 1);

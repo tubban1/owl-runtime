@@ -1,12 +1,17 @@
-# AgentOS Runtime Documentation
+# OWL Runtime Documentation
 
 This directory is organized by document purpose rather than release chronology.
 
 ## Start here
 
+- [Repository boundaries](architecture/repository-boundaries.md)
+- [Runtime daemon and MCP adapter boundary](architecture/runtime-daemon-boundary.md)
 - [Architecture overview](architecture/overview.md)
 - [Layer model](architecture/layers.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
+- [v1.0 scope lock](roadmap/1.0-scope-lock.md)
+- [v1.0 frozen baseline](roadmap/1.0-frozen-baseline.md)
+- [v1.x evolution](roadmap/1.x-evolution.md)
 - [Production Runtime](operations/production-runtime.md)
 - [Concurrency and ownership](architecture/concurrency-and-ownership.md)
 
@@ -14,6 +19,7 @@ This directory is organized by document purpose rather than release chronology.
 
 Long-lived system design and boundaries.
 
+- [Repository boundaries](architecture/repository-boundaries.md)
 - [Overview](architecture/overview.md)
 - [Layers](architecture/layers.md)
 - [Concurrency and ownership](architecture/concurrency-and-ownership.md)
@@ -24,6 +30,10 @@ Long-lived system design and boundaries.
 Contracts intended to remain stable across implementations.
 
 - [Primitive ABI](specifications/primitive-abi.md)
+- [Observation ABI](specifications/observation-abi.md)
+- [Verifier ABI](specifications/verifier-abi.md)
+- [ExecutionTarget and Provider Affinity](specifications/execution-target.md)
+- [Provider Postconditions](specifications/provider-postconditions.md)
 - [Skill ABI](specifications/skill-abi.md)
 - [Embedding Provider Contract](specifications/embedding-provider.md)
 - [Session Adapter Contract](specifications/session-adapter.md)
@@ -35,6 +45,9 @@ Contracts intended to remain stable across implementations.
 - [Tasks and staging](runtime/tasks-and-staging.md)
 - [Scheduler and wake](runtime/scheduler-and-wake.md)
 - [Loop controller](runtime/loop-controller.md)
+- [Managed process state machine](runtime/process-state-machine.md)
+- [Execution health model](runtime/health-model.md)
+- [Diagnostic support package](runtime/support-package.md)
 - [Memory overview](runtime/memory/overview.md)
 - [Episodic recall](runtime/memory/episodic-recall.md)
 - [Semantic memory](runtime/memory/semantic-memory.md)
@@ -58,6 +71,7 @@ Contracts intended to remain stable across implementations.
 ## Security
 
 - [Permissions](security/permissions.md)
+- [Approval policy and receipts](security/approval-policy.md)
 - [Audit](security/audit.md)
 - [Privacy and secrets](security/privacy-and-secrets.md)
 
@@ -65,7 +79,9 @@ Contracts intended to remain stable across implementations.
 
 - [v1.0](roadmap/v1.0.md)
 - [Post-1.0](roadmap/post-1.0.md)
+- [v1.x evolution](roadmap/1.x-evolution.md)
 - [Release checklist](roadmap/release-checklist.md)
+- [Release terminology](roadmap/release-terminology.md)
 
 ## Architecture Decision Records
 

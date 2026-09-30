@@ -54,7 +54,13 @@ import {
   ensureWorkspaceWriteLease,
 } from "../runtime/workspaceLeaseManager.js";
 import { currentExecutionContext } from "../runtime/executionContext.js";
+import { assertProviderAffinity } from "../runtime/executionTarget.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
+import {
+  defaultVerificationForAction,
+  observeRoutedActionOutcome,
+} from "../observation/actionObservation.js";
+import { authorizeAction } from "../policy/approvalPolicy.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -250,9 +256,14 @@ const actions = {
   "shell.input": {
     provider: "shell",
     description: "Send stdin to a managed process.",
-    schema: z.object({ process_id: z.string(), input: z.string() }),
+    schema: z.object({
+      process_id: z.string(),
+      input: z.string(),
+      control_token: z.string().min(20).optional(),
+    }),
     destructive: true,
-    run: ({ process_id, input }: any) => sendProcessInput(process_id, input),
+    run: ({ process_id, input, control_token }: any) =>
+      sendProcessInput(process_id, input, control_token),
   },
   "shell.output": {
     provider: "shell",
@@ -270,9 +281,11 @@ const actions = {
     schema: z.object({
       process_id: z.string(),
       signal: z.enum(["SIGTERM", "SIGKILL", "SIGINT"]).optional(),
+      control_token: z.string().min(20).optional(),
     }),
     destructive: true,
-    run: ({ process_id, signal }: any) => killProcess(process_id, signal ?? "SIGTERM"),
+    run: ({ process_id, signal, control_token }: any) =>
+      killProcess(process_id, signal ?? "SIGTERM", control_token),
   },
 
   "git.status": {
@@ -779,6 +792,11 @@ export async function executeRoutedAction(
   const contract = getActionContract(action, parsed);
   const startedAt = Date.now();
   const executionContext = currentExecutionContext();
+  const executionTarget = assertProviderAffinity(
+    definition.provider,
+    executionContext.executionTarget,
+  );
+  const approval = await authorizeAction(action, parsed, contract);
   const lifecycleMutation =
     contract.sideEffects.length > 0
       ? runtimeLifecycle.beginMutation(action, {
@@ -851,14 +869,29 @@ export async function executeRoutedAction(
     resources,
     async () => await definition.run(parsed),
   );
+  const observation = await observeRoutedActionOutcome(
+    action,
+    parsed as JsonObject,
+    executed.result,
+  );
+  const verification = defaultVerificationForAction(
+    action,
+    parsed as JsonObject,
+    executed.result,
+    observation,
+  );
 
   return {
     action,
     provider: definition.provider,
+    executionTarget,
     durationMs: Date.now() - startedAt,
     resourceWaitMs: executed.lease.waitMs,
     contract: summarizeActionContract(contract),
     workspaceOwnership,
+    approval,
+    observation,
+    verification,
     result: executed.result,
   };
   } finally {

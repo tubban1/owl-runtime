@@ -1,8 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import {
+  HOST_EXECUTION_TARGET,
+  type ExecutionTarget,
+} from "./executionTarget.js";
 
 export type ExecutionOrigin =
   | "mcp"
+  | "api"
   | "task"
   | "scheduler"
   | "loop"
@@ -13,9 +18,11 @@ export type ExecutionContext = {
   requestId: string;
   origin: ExecutionOrigin;
   taskId?: string;
+  stepId?: string;
   loopId?: string;
   scheduleId?: string;
   tool?: string;
+  executionTarget?: ExecutionTarget;
 };
 
 const storage = new AsyncLocalStorage<ExecutionContext>();
@@ -25,6 +32,7 @@ export function systemExecutionContext(): ExecutionContext {
     sessionId: "runtime:system",
     requestId: `system:${process.pid}:${randomUUID()}`,
     origin: "system",
+    executionTarget: { ...HOST_EXECUTION_TARGET },
   };
 }
 
@@ -59,6 +67,10 @@ export async function withChildExecutionContext<T>(
       sessionId: partial.sessionId ?? parent.sessionId,
       requestId: partial.requestId ?? parent.requestId,
       origin: partial.origin ?? parent.origin,
+      executionTarget:
+        partial.executionTarget ??
+        parent.executionTarget ??
+        { ...HOST_EXECUTION_TARGET },
     },
     operation,
   );

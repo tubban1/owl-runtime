@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = path.join(root, ".tmp-verify-concurrency");
+const scratch = path.join(root, `.tmp-verify-concurrency-${process.pid}`);
 const parentWorkspace = path.join(scratch, "parent");
 const repoA = path.join(parentWorkspace, "repo-a");
 const repoB = path.join(parentWorkspace, "repo-b");
@@ -18,8 +18,8 @@ for (const dir of [parentWorkspace, repoA, repoB]) {
 }
 await fs.mkdir(repoTx, { recursive: true });
 
-process.env.AGENTOS_RUNTIME_MODE = "test";
-process.env.AGENTOS_STATE_ROOT = path.join(scratch, "state");
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.WORKSPACE_LEASE_DIR = path.join(
   scratch,
   "state",
@@ -331,24 +331,34 @@ try {
     await releaseWorkspaceLease(repoB),
   );
 
-  // Chat stream recovery can leave a transport session looking active even
-  // though it never makes another call. Session-only leases are reclaimable
-  // after a conservative idle timeout. The verifier sets that timeout to zero
-  // only for this isolated test.
+  // A connected session's explicit lease must never be stolen solely because
+  // the session has been idle. Idle time is not proof that write ownership
+  // ended. This is intentionally fail-safe: disconnected/previous-runtime
+  // leases can be reclaimed, but connected ownership requires TTL, release,
+  // or an explicit handoff. The legacy idle-reclaim env no longer weakens
+  // this guarantee.
   process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS = "0";
-  const idleLease = await withExecutionContext(sessionD, async () =>
+  const connectedLease = await withExecutionContext(sessionD, async () =>
     await ensureWorkspaceWriteLease(repoB, {
-      purpose: "same-runtime stale active session lease",
+      purpose: "connected session lease must not be stolen",
+      ttlMs: 10_000,
     }),
   );
-  assert.equal(idleLease.ownerSessionId, sessionD.sessionId);
-  const idleReclaimed = await withExecutionContext(sessionB, async () =>
-    await ensureWorkspaceWriteLease(repoB, {
-      purpose: "reclaimed after stale active transport",
-    }),
+  assert.equal(connectedLease.ownerSessionId, sessionD.sessionId);
+  await assert.rejects(
+    () =>
+      withExecutionContext(sessionB, async () =>
+        await ensureWorkspaceWriteLease(repoB, {
+          purpose: "must remain blocked by connected owner",
+        }),
+      ),
+    /WORKSPACE_BUSY/,
   );
-  assert.equal(idleReclaimed.ownerSessionId, sessionB.sessionId);
-  await withExecutionContext(sessionB, async () =>
+  assert.equal(
+    (await workspaceLeaseStatus(repoB)).lease?.ownerSessionId,
+    sessionD.sessionId,
+  );
+  await withExecutionContext(sessionD, async () =>
     await releaseWorkspaceLease(repoB),
   );
   delete process.env.WORKSPACE_SESSION_IDLE_RECLAIM_MS;
@@ -391,7 +401,7 @@ try {
   assert.equal((await workspaceLeaseStatus(repoTx)).busy, false);
 
   // Production Runtime may not mutate its own active release.
-  process.env.AGENTOS_RUNTIME_MODE = "production";
+  process.env.OWL_RUNTIME_MODE = "production";
   await assert.rejects(
     () =>
       withExecutionContext(sessionB, async () =>
@@ -399,7 +409,7 @@ try {
       ),
     /RUNTIME_SELF_IMMUTABLE/,
   );
-  process.env.AGENTOS_RUNTIME_MODE = "test";
+  process.env.OWL_RUNTIME_MODE = "test";
 
   console.log(
     JSON.stringify(
@@ -416,7 +426,7 @@ try {
         processExitReleasesLease: true,
         orphanSessionLeaseReclamation: true,
         sameRuntimeDisconnectedSessionReclamation: true,
-        staleActiveSessionReclamation: true,
+        connectedSessionLeaseNotStolenWhenIdle: true,
         transactionOwnershipTransportIndependent: true,
         sameFileBatchEditsCompose: true,
         runtimeSelfProductionGuard: true,
@@ -426,7 +436,7 @@ try {
     ),
   );
 } finally {
-  process.env.AGENTOS_RUNTIME_MODE = "test";
+  process.env.OWL_RUNTIME_MODE = "test";
   if (processId) {
     runtimeSessionManager.disconnect(sessionA.sessionId);
     await withExecutionContext(sessionB, async () => {

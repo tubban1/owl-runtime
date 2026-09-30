@@ -1,0 +1,47 @@
+name: 1.x Tested Activation Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-tested-activation
+  pull_request:
+    branches:
+      - feature/1.x-execution-revision
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tested-activation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tested-activation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Verify Public Runtime Client
+        run: npm run verify:public-runtime-client
+      - name: Verify HTTP Runtime Client
+        run: npm run verify:http-runtime-client
+      - name: Verify Consequential Request Replay
+        run: npm run verify:request-replay
+      - name: Verify Execution Revision
+        run: npm run verify:execution-revision
+      - name: Verify Tested Activation
+        run: npm run verify:execution-activation
+      - name: Verify User Skill Registry
+        run: npm run verify:user-skills
+      - name: Build Public Types
+        run: npm run build:types

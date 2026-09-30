@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = path.join(root, ".tmp-verify-session-adapters");
+const scratch = path.join(root, `.tmp-verify-session-adapters-${process.pid}`);
 
 async function findChromeForTesting(): Promise<string | undefined> {
   const home = process.env.HOME;

@@ -671,9 +671,12 @@ export async function executePrimitive(
     tier: resolved.tier,
     routedAction: resolved.routedAction,
     provider: executed.provider,
+    executionTarget: executed.executionTarget,
     contract: executed.contract,
     resourceWaitMs: executed.resourceWaitMs,
     durationMs: executed.durationMs,
+    observation: executed.observation,
+    verification: executed.verification,
     result: executed.result,
   };
 }

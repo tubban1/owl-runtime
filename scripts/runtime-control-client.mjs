@@ -1,16 +1,13 @@
 #!/usr/bin/env node
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 function usage() {
   console.error(
-    "Usage: node scripts/runtime-control-client.mjs <mcp-url> <status|drain|wait|resume> [json-args]",
+    "Usage: node scripts/runtime-control-client.mjs <runtime-base-url> <status|drain|wait|resume> [json-args]",
   );
 }
 
-const [, , serverUrl, op, jsonArgs = "{}"] = process.argv;
-if (!serverUrl || !op) {
+const [, , rawBaseUrl, op, jsonArgs = "{}"] = process.argv;
+if (!rawBaseUrl || !op) {
   usage();
   process.exit(2);
 }
@@ -25,61 +22,53 @@ try {
   process.exit(2);
 }
 
-const client = new Client({
-  name: "agentos-runtime-control-client",
-  version: "0.1.0",
-});
-const transport = new StreamableHTTPClientTransport(new URL(serverUrl));
+const baseUrl = rawBaseUrl
+  .replace(/\/+$/, "")
+  .replace(/\/mcp$/, "");
 
-function extractText(result) {
-  const textParts = result.content
-    .filter((item) => item.type === "text")
-    .map((item) => item.text);
-  if (textParts.length === 0) return result;
-  const joined = textParts.join("\n");
-  try {
-    return JSON.parse(joined);
-  } catch {
-    return joined;
-  }
-}
+const headers = {
+  "content-type": "application/json",
+  "x-owl-session-id": "runtime:upgrade-control",
+  "x-owl-request-id": `upgrade:${Date.now()}:${process.pid}`,
+  ...(process.env.OWL_RUNTIME_API_TOKEN
+    ? { authorization: `Bearer ${process.env.OWL_RUNTIME_API_TOKEN}` }
+    : {}),
+};
 
 try {
-  await client.connect(transport);
-  const result = await client.request(
-    {
-      method: "tools/call",
+  const response = await fetch(`${baseUrl}/runtime/v0.1/rpc`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      method: "skill.run",
       params: {
-        name: "skill_run",
-        arguments: {
-          skill: "runtime.control",
-          args: {
-            op,
-            ...extraArgs,
-          },
+        skill: "runtime.control",
+        args: {
+          op,
+          ...extraArgs,
         },
       },
-    },
-    CallToolResultSchema,
-  );
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
 
-  const extracted = extractText(result);
-  const output =
-    extracted &&
-    typeof extracted === "object" &&
-    Object.prototype.hasOwnProperty.call(extracted, "result")
-      ? extracted.result
-      : extracted;
-
-  if (result.isError) {
-    console.error(JSON.stringify(output, null, 2));
+  const payload = await response.json();
+  if (!response.ok || payload?.ok !== true) {
+    console.error(JSON.stringify(payload, null, 2));
     process.exitCode = 1;
   } else {
+    const skillResult = payload.result;
+    const output =
+      skillResult &&
+      typeof skillResult === "object" &&
+      Object.prototype.hasOwnProperty.call(skillResult, "result")
+        ? skillResult.result
+        : skillResult;
     console.log(JSON.stringify(output, null, 2));
   }
 } catch (error) {
-  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  console.error(
+    error instanceof Error ? error.stack ?? error.message : String(error),
+  );
   process.exitCode = 1;
-} finally {
-  await transport.close().catch(() => undefined);
 }

@@ -59,15 +59,16 @@ For an existing v0.9.12+ production installation, use the [Production upgrade pr
 
 ## Workspace session-lease recovery
 
-MCP transport sessions are not durable workflow identities. Session-only workspace leases can be reclaimed when the owning transport disconnects and, as a conservative fallback, after an apparently active session remains idle.
+MCP transport sessions are not durable workflow identities. Session-only workspace leases can be reclaimed when the Runtime **knows the owning transport disconnected**, or when a lease belongs to a previous Runtime instance.
 
-Defaults:
+Default disconnect grace:
 
 ```text
 WORKSPACE_SESSION_RECLAIM_GRACE_MS=5000
-WORKSPACE_SESSION_IDLE_RECLAIM_MS=900000
 ```
 
-The idle fallback applies only to session-only leases with no durable Task owner and no pinned managed process. Task-, Process-, and Transaction-owned leases are not reclaimed merely because the MCP transport is idle.
+OWL Runtime 1.0 deliberately does **not** reclaim a still-connected session's write lease merely because the session has been idle. Idle time is not proof that write ownership ended, and stealing a live lease can permit concurrent writers.
 
-For work that spans many tool calls, prefer durable Task/Process/Transaction ownership rather than increasing reliance on a raw session lease.
+The legacy `WORKSPACE_SESSION_IDLE_RECLAIM_MS` setting is no longer used for lease reclamation.
+
+For work that spans many tool calls, prefer durable Task/Process/Transaction ownership. Explicit session leases end by release, handoff, their own TTL, known disconnect, or Runtime-instance replacement.

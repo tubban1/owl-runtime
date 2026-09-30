@@ -7,19 +7,20 @@ cd "$REPO_ROOT"
 
 VERSION="$(node -p "require('./package.json').version")"
 SHORT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
-AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
+OWL_HOME="${OWL_HOME:-${AGENTOS_HOME:-$HOME/.owl}}"
 RELEASE_NAME="$VERSION-$SHORT_SHA"
-RELEASE_DIR="$AGENTOS_HOME/releases/$RELEASE_NAME"
-TMP_RELEASE="$AGENTOS_HOME/releases/.tmp-$RELEASE_NAME-$$"
-CURRENT_LINK="$AGENTOS_HOME/current"
-ENV_FILE="${AGENTOS_RUNTIME_ENV:-$AGENTOS_HOME/runtime.env}"
-STATE_ROOT="${AGENTOS_PRODUCTION_STATE_ROOT:-$HOME/.computer-mcp}"
-LOG_DIR="$AGENTOS_HOME/logs"
-PLIST="$HOME/Library/LaunchAgents/com.agentos.runtime.plist"
+RELEASE_DIR="$OWL_HOME/releases/$RELEASE_NAME"
+TMP_RELEASE="$OWL_HOME/releases/.tmp-$RELEASE_NAME-$$"
+CURRENT_LINK="$OWL_HOME/current"
+ENV_FILE="${OWL_RUNTIME_ENV:-${AGENTOS_RUNTIME_ENV:-$OWL_HOME/runtime.env}}"
+STATE_ROOT="${OWL_PRODUCTION_STATE_ROOT:-${AGENTOS_PRODUCTION_STATE_ROOT:-$HOME/.owl-runtime}}"
+LOG_DIR="$OWL_HOME/logs"
+PLIST="$HOME/Library/LaunchAgents/com.owl.runtime.plist"
 PREVIOUS_RELEASE="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
-LABEL="com.agentos.runtime"
+LABEL="com.owl.runtime"
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
+RUNTIME_HOST_BIN="$HOME/Applications/OWL Runtime.app/Contents/MacOS/OwlRuntimeHost"
 
 if [[ "${ALLOW_DIRTY_PRODUCTION_INSTALL:-false}" != "true" ]]; then
   TRACKED_DIRTY="$(git status --porcelain --untracked-files=no)"
@@ -31,9 +32,18 @@ if [[ "${ALLOW_DIRTY_PRODUCTION_INSTALL:-false}" != "true" ]]; then
   fi
 fi
 
-mkdir -p "$AGENTOS_HOME/releases" "$LOG_DIR" "$(dirname "$PLIST")"
+mkdir -p "$OWL_HOME/releases" "$LOG_DIR" "$(dirname "$PLIST")"
 
-echo "Building AgentOS Runtime $VERSION..."
+if [[ ! -x "$RUNTIME_HOST_BIN" ]]; then
+  echo "Installing stable OWL Runtime Host..."
+  "$REPO_ROOT/scripts/install-macos-runtime-host.sh"
+fi
+[[ -x "$RUNTIME_HOST_BIN" ]] || {
+  echo "OWL Runtime Host is unavailable: $RUNTIME_HOST_BIN"
+  exit 1
+}
+
+echo "Building OWL Runtime $VERSION..."
 "$NPM_BIN" run build
 
 rm -rf "$TMP_RELEASE"
@@ -51,17 +61,17 @@ cat > "$TMP_RELEASE/run.sh" <<EOF
 #!/bin/zsh
 set -euo pipefail
 
-ENV_FILE="${AGENTOS_RUNTIME_ENV:-$ENV_FILE}"
+ENV_FILE="${OWL_RUNTIME_ENV:-${AGENTOS_RUNTIME_ENV:-$ENV_FILE}}"
 if [[ -f "$ENV_FILE" ]]; then
   set -a
   source "$ENV_FILE"
   set +a
 fi
 
-export AGENTOS_RUNTIME_MODE=production
-export AGENTOS_STATE_ROOT="${AGENTOS_PRODUCTION_STATE_ROOT:-$STATE_ROOT}"
+export OWL_RUNTIME_MODE=production
+export OWL_STATE_ROOT="${OWL_PRODUCTION_STATE_ROOT:-${AGENTOS_PRODUCTION_STATE_ROOT:-$STATE_ROOT}}"
 RELEASE_ROOT="\$(cd "\$(dirname "\$0")" && pwd)"
-exec "$NODE_BIN" "\$RELEASE_ROOT/dist/server.js"
+exec "$RUNTIME_HOST_BIN" --env-file "$ENV_FILE" "$NODE_BIN" "\$RELEASE_ROOT/dist/server.js"
 EOF
 chmod 700 "$TMP_RELEASE/run.sh"
 
@@ -72,14 +82,26 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo "Created $ENV_FILE from the current project .env."
   else
     cat > "$ENV_FILE" <<'EOF'
-# AgentOS Runtime production environment.
+# OWL Runtime production environment.
 # Add ALLOWED_DIRECTORIES and capability flags here.
 PORT=8787
-AGENTOS_WAKE_NAME=Jarvis
+OWL_WAKE_NAME=OWL
 EOF
     chmod 600 "$ENV_FILE"
     echo "Created minimal $ENV_FILE. Configure permissions before relying on production actions."
   fi
+fi
+
+if ! /usr/bin/grep -q '^OWL_RUNTIME_API_TOKEN=' "$ENV_FILE"; then
+  RUNTIME_API_TOKEN="$("$NODE_BIN" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64url"))')"
+  {
+    echo
+    echo "# Local OWL Runtime public API bearer token."
+    echo "OWL_RUNTIME_API_TOKEN=$RUNTIME_API_TOKEN"
+  } >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  unset RUNTIME_API_TOKEN
+  echo "Generated OWL_RUNTIME_API_TOKEN in $ENV_FILE."
 fi
 
 if [[ -e "$RELEASE_DIR" ]]; then
@@ -97,7 +119,11 @@ cat > "$PLIST" <<EOF
   <string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$CURRENT_LINK/run.sh</string>
+    <string>$RUNTIME_HOST_BIN</string>
+    <string>--env-file</string>
+    <string>$ENV_FILE</string>
+    <string>$NODE_BIN</string>
+    <string>$CURRENT_LINK/dist/server.js</string>
   </array>
   <key>WorkingDirectory</key>
   <string>$CURRENT_LINK</string>
@@ -134,7 +160,7 @@ HEALTH_PORT="$(
 )"
 
 HEALTH_URL="http://127.0.0.1:$HEALTH_PORT/health"
-HEALTH_FILE="$AGENTOS_HOME/last-health.json"
+HEALTH_FILE="$OWL_HOME/last-health.json"
 HEALTHY=false
 for _ in {1..80}; do
   if /usr/bin/curl -fsS "$HEALTH_URL" > "$HEALTH_FILE" 2>/dev/null; then
@@ -157,7 +183,7 @@ for _ in {1..80}; do
 done
 
 if [[ "$HEALTHY" != "true" ]]; then
-  echo "AgentOS Runtime failed health check: $HEALTH_URL"
+  echo "OWL Runtime failed health check: $HEALTH_URL"
   echo "stdout: $LOG_DIR/runtime.stdout.log"
   echo "stderr: $LOG_DIR/runtime.stderr.log"
 
@@ -213,12 +239,12 @@ if [[ "$HEALTHY" != "true" ]]; then
   exit 1
 fi
 
-echo "AgentOS Runtime production release installed."
+echo "OWL Runtime production release installed."
 echo "  version: $VERSION"
 echo "  release: $RELEASE_DIR"
 echo "  current: $CURRENT_LINK"
 echo "  state:   $STATE_ROOT"
 echo "  env:     $ENV_FILE"
 echo "  health:  $HEALTH_URL"
-cat "$AGENTOS_HOME/last-health.json"
+cat "$OWL_HOME/last-health.json"
 echo

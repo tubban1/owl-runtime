@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -25,6 +26,14 @@ import {
   unpinWorkspaceLeaseForProcess,
 } from "../runtime/workspaceLeaseManager.js";
 import { runtimeSessionManager } from "../runtime/runtimeSessionManager.js";
+import { createObservation, type ObservationState } from "../observation/observationAbi.js";
+import { assessManagedProcessState } from "../runtime/processState.js";
+import {
+  cancellableSleep,
+  currentCancellationSignal,
+  OperationCancelledError,
+  throwIfCancelled,
+} from "../runtime/cancellation.js";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const runtimeInstanceId =
@@ -46,6 +55,29 @@ function shellBinary(): string {
   return process.env.SHELL || "/bin/zsh";
 }
 
+function signalProcessGroup(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+): boolean {
+  if (!child.pid) return false;
+
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+
+  try {
+    return child.kill(signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -55,20 +87,47 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+function newProcessControlToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function hashProcessControlToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function processControlTokenMatches(
+  record: ManagedProcessRecord,
+  controlToken?: string,
+): boolean {
+  if (!controlToken || !record.controlTokenHash) return false;
+  const expected = Buffer.from(record.controlTokenHash, "hex");
+  const actual = Buffer.from(hashProcessControlToken(controlToken), "hex");
+  return (
+    expected.length === actual.length &&
+    expected.length > 0 &&
+    timingSafeEqual(expected, actual)
+  );
+}
+
 function processOwnerMatches(
   record: ManagedProcessRecord,
   context: ExecutionContext = currentExecutionContext(),
+  controlToken?: string,
 ): boolean {
+  if (processControlTokenMatches(record, controlToken)) return true;
   if (record.ownerTaskId && context.taskId === record.ownerTaskId) return true;
   if (record.ownerSessionId === context.sessionId) return true;
   return context.origin === "system" && context.sessionId === "runtime:system";
 }
 
-function assertProcessOwner(record: ManagedProcessRecord) {
+function assertProcessOwner(
+  record: ManagedProcessRecord,
+  controlToken?: string,
+) {
   const context = currentExecutionContext();
-  if (processOwnerMatches(record, context)) return;
+  if (processOwnerMatches(record, context, controlToken)) return;
   throw new Error(
-    `PROCESS_OWNED: ${record.processId} belongs to ${record.ownerTaskId ? `task:${record.ownerTaskId}` : `session:${record.ownerSessionId}`} and cannot be controlled by session:${context.sessionId}.`,
+    `PROCESS_OWNED: ${record.processId} belongs to ${record.ownerTaskId ? `task:${record.ownerTaskId}` : `session:${record.ownerSessionId}`} and cannot be controlled by session:${context.sessionId} without the process control capability.`,
   );
 }
 
@@ -104,6 +163,37 @@ async function reconcileRecord(
     return record;
   }
 
+  const live = liveChildren.get(record.processId)?.child;
+
+  // For a child owned by this Runtime instance, Node's ChildProcess lifecycle is
+  // more authoritative than a point-in-time PID probe. There is a small window
+  // after the OS process exits but before the async exit handler persists the
+  // durable "exited" record. Treating that window as "lost" creates a false
+  // terminal state and can race with markExited().
+  if (live) {
+    if (live.exitCode !== null || live.signalCode !== null) {
+      record.status = "exited";
+      record.exitCode = live.exitCode;
+      record.signal = live.signalCode as NodeJS.Signals | null;
+      record.inputAvailable = false;
+      await writeManagedProcess(record);
+      liveChildren.delete(record.processId);
+      await unpinWorkspaceLeaseForProcess(record.processId).catch(
+        () => undefined,
+      );
+      return record;
+    }
+
+    if (!pidAlive(record.pid)) {
+      // The child exit event has not been delivered yet. Keep the durable state
+      // non-terminal for this brief transition and let the next observation (or
+      // markExited) commit the real exit code/signal.
+      return record;
+    }
+
+    return record;
+  }
+
   if (pidAlive(record.pid)) {
     if (record.runtimeInstanceId !== runtimeInstanceId) {
       record.runtimeInstanceId = runtimeInstanceId;
@@ -114,12 +204,27 @@ async function reconcileRecord(
     return record;
   }
 
-  record.status = "lost";
-  record.inputAvailable = false;
-  record.exitCode = record.exitCode ?? null;
-  await writeManagedProcess(record);
-  await unpinWorkspaceLeaseForProcess(record.processId).catch(() => undefined);
-  return record;
+  // Re-read before declaring a process lost. A concurrent exit handler may
+  // have persisted "exited" after this caller loaded its stale "running"
+  // snapshot.
+  const latest = await readManagedProcess(record.processId).catch(
+    () => record,
+  );
+  if (
+    latest.status !== "running" &&
+    latest.status !== "terminating"
+  ) {
+    return latest;
+  }
+
+  latest.status = "lost";
+  latest.inputAvailable = false;
+  latest.exitCode = latest.exitCode ?? null;
+  await writeManagedProcess(latest);
+  await unpinWorkspaceLeaseForProcess(latest.processId).catch(
+    () => undefined,
+  );
+  return latest;
 }
 
 async function readLogTail(filePath: string, tailChars: number): Promise<string> {
@@ -148,6 +253,8 @@ export async function executeCommand(
 ) {
   requireCapability("ALLOW_SHELL", false);
   const safeCwd = await assertAllowedExistingPath(cwd);
+  const cancellationSignal = currentCancellationSignal();
+  throwIfCancelled(cancellationSignal);
 
   return await new Promise<{
     command: string;
@@ -161,12 +268,38 @@ export async function executeCommand(
     const child = spawn(shellBinary(), ["-lc", command], {
       cwd: safeCwd,
       env: process.env,
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
 
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
+    let cancellationReason: unknown;
+    let settled = false;
+
+    const cleanup = () => {
+      cancellationSignal?.removeEventListener("abort", onAbort);
+    };
+
+    const terminate = () => {
+      signalProcessGroup(child, "SIGTERM");
+      setTimeout(() => {
+        try {
+          signalProcessGroup(child, "SIGKILL");
+        } catch {
+          // Process already exited.
+        }
+      }, 2_000).unref();
+    };
+
+    const onAbort = () => {
+      if (settled || cancelled) return;
+      cancelled = true;
+      cancellationReason = cancellationSignal?.reason;
+      terminate();
+    };
 
     child.stdout?.on("data", (chunk) => {
       stdout = appendCapped(stdout, chunk);
@@ -174,16 +307,31 @@ export async function executeCommand(
     child.stderr?.on("data", (chunk) => {
       stderr = appendCapped(stderr, chunk);
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    });
+
+    cancellationSignal?.addEventListener("abort", onAbort, { once: true });
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+      terminate();
     }, Math.min(Math.max(timeoutMs, 1_000), 10 * 60_000));
 
     child.on("close", (exitCode, signal) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      cleanup();
+
+      if (cancelled) {
+        reject(new OperationCancelledError(cancellationReason));
+        return;
+      }
+
       resolve({
         command,
         cwd: safeCwd,
@@ -206,6 +354,7 @@ export async function startProcess(
   const safeCwd = await assertAllowedExistingPath(cwd);
   const workspace = await resolveWorkspace(safeCwd);
   const processId = newManagedProcessId();
+  const controlToken = newProcessControlToken();
   const context = currentExecutionContext();
 
   const leaseContext =
@@ -262,6 +411,7 @@ export async function startProcess(
     ...(workspaceLeaseId ? { workspaceLeaseId } : {}),
     ownerSessionId: context.sessionId,
     ...(context.taskId ? { ownerTaskId: context.taskId } : {}),
+    controlTokenHash: hashProcessControlToken(controlToken),
     startedAt: now,
     updatedAt: now,
     status: "running",
@@ -312,6 +462,7 @@ export async function startProcess(
     workspaceLeaseId: record.workspaceLeaseId ?? null,
     ownerSessionId: record.ownerSessionId,
     ownerTaskId: record.ownerTaskId ?? null,
+    controlToken,
     stdoutPath: record.stdoutPath,
     stderrPath: record.stderrPath,
     durable: true,
@@ -341,10 +492,14 @@ export async function listProcesses() {
   }));
 }
 
-export async function sendProcessInput(processId: string, input: string) {
+export async function sendProcessInput(
+  processId: string,
+  input: string,
+  controlToken?: string,
+) {
   requireCapability("ALLOW_SHELL", false);
   const record = await reconcileRecord(await readManagedProcess(processId));
-  assertProcessOwner(record);
+  assertProcessOwner(record, controlToken);
 
   if (record.status !== "running") {
     throw new Error("Process is not running.");
@@ -364,7 +519,10 @@ export async function sendProcessInput(processId: string, input: string) {
   };
 }
 
-export async function claimRecoveredProcess(processId: string) {
+export async function claimRecoveredProcess(
+  processId: string,
+  controlToken?: string,
+) {
   const record = await reconcileRecord(await readManagedProcess(processId));
   if (
     record.status !== "running" &&
@@ -381,9 +539,14 @@ export async function claimRecoveredProcess(processId: string) {
   const orphanedByRestart =
     Boolean(record.recoveredAfterRestart) && !liveChildren.has(processId);
 
-  if (!orphanedByRestart && !ownerDisconnected) {
+  const capabilityAuthorized = processControlTokenMatches(
+    record,
+    controlToken,
+  );
+
+  if (!orphanedByRestart && !ownerDisconnected && !capabilityAuthorized) {
     throw new Error(
-      "PROCESS_NOT_ORPHANED: claim requires either a Runtime-recovered process or a disconnected original MCP transport session.",
+      "PROCESS_NOT_ORPHANED: claim requires a Runtime-recovered process, a disconnected original transport session, or the process control capability.",
     );
   }
 
@@ -402,6 +565,171 @@ export async function claimRecoveredProcess(processId: string) {
     ownerTaskId: record.ownerTaskId ?? null,
     workspace: record.workspace,
     workspaceLeaseId: record.workspaceLeaseId ?? null,
+  };
+}
+
+
+export async function observeProcess(
+  processId: string,
+  tailChars = 20_000,
+) {
+  const record = await reconcileRecord(await readManagedProcess(processId));
+  const [stdout, stderr] = await Promise.all([
+    readLogTail(record.stdoutPath, tailChars),
+    readLogTail(record.stderrPath, tailChars),
+  ]);
+  const stdinAttached = Boolean(
+    liveChildren.get(processId)?.child.stdin?.writable,
+  );
+  const assessment = assessManagedProcessState({
+    record,
+    stdout,
+    stderr,
+    stdinAttached,
+  });
+
+  return createObservation({
+    channel: "process",
+    provider: "managed-process",
+    subject: processId,
+    state: assessment.observationState,
+    data: {
+      processId,
+      pid: record.pid,
+      command: record.command,
+      cwd: record.cwd,
+      runtimeState: assessment.state,
+      durableStatus: record.status,
+      terminal: assessment.terminal,
+      confidence: assessment.confidence,
+      reason: assessment.reason,
+      exitCode: record.exitCode ?? null,
+      signal: record.signal ?? null,
+      inputAvailable: stdinAttached,
+      recoveredAfterRestart: record.recoveredAfterRestart ?? false,
+      stdout,
+      stderr,
+    },
+    evidence: [
+      ...(stdout ? [{ kind: "stdout" as const, ref: record.stdoutPath }] : []),
+      ...(stderr ? [{ kind: "stderr" as const, ref: record.stderrPath }] : []),
+      ...(record.status === "exited"
+        ? [{
+            kind: "exit_code" as const,
+            metadata: { exitCode: record.exitCode ?? null, signal: record.signal ?? null },
+          }]
+        : []),
+    ],
+    metadata: {
+      workspace: record.workspace,
+      workspaceMode: record.workspaceMode,
+      ownerSessionId: record.ownerSessionId,
+      ownerTaskId: record.ownerTaskId ?? null,
+    },
+  });
+}
+
+export async function waitForProcessState(
+  processId: string,
+  options: {
+    states?: ObservationState[];
+    timeoutMs?: number;
+    pollMs?: number;
+    tailChars?: number;
+  } = {},
+) {
+  const targets = new Set<ObservationState>(
+    options.states?.length
+      ? options.states
+      : ["waiting_input", "finished", "failed", "lost"],
+  );
+  const timeoutMs = Math.min(Math.max(Math.trunc(options.timeoutMs ?? 30_000), 0), 60_000);
+  const pollMs = Math.min(Math.max(Math.trunc(options.pollMs ?? 250), 100), 5_000);
+  const deadline = Date.now() + timeoutMs;
+  let observation = await observeProcess(processId, options.tailChars ?? 20_000);
+
+  while (
+    !targets.has(observation.state) &&
+    !["finished", "failed", "lost"].includes(observation.state) &&
+    Date.now() < deadline
+  ) {
+    await cancellableSleep(pollMs);
+    observation = await observeProcess(processId, options.tailChars ?? 20_000);
+  }
+
+  return {
+    matched: targets.has(observation.state),
+    timedOut: !targets.has(observation.state) && Date.now() >= deadline,
+    targetStates: [...targets],
+    observation,
+  };
+}
+
+export async function interactWithManagedProcess(
+  processId: string,
+  input: string,
+  options: {
+    timeoutMs?: number;
+    pollMs?: number;
+    tailChars?: number;
+    controlToken?: string;
+  } = {},
+) {
+  const tailChars = options.tailChars ?? 20_000;
+  const before = await observeProcess(processId, tailChars);
+  const beforeData = before.data as Record<string, unknown>;
+  const beforeStdout =
+    typeof beforeData.stdout === "string" ? beforeData.stdout : "";
+  const beforeStderr =
+    typeof beforeData.stderr === "string" ? beforeData.stderr : "";
+
+  const write = await sendProcessInput(
+    processId,
+    input,
+    options.controlToken,
+  );
+
+  const timeoutMs = Math.min(
+    Math.max(Math.trunc(options.timeoutMs ?? 8_000), 0),
+    60_000,
+  );
+  const pollMs = Math.min(
+    Math.max(Math.trunc(options.pollMs ?? 250), 100),
+    5_000,
+  );
+  const deadline = Date.now() + timeoutMs;
+
+  let observation = await observeProcess(processId, tailChars);
+  let matched = false;
+
+  while (true) {
+    const terminal = ["finished", "failed", "lost"].includes(
+      observation.state,
+    );
+    const data = observation.data as Record<string, unknown>;
+    const stdout = typeof data.stdout === "string" ? data.stdout : "";
+    const stderr = typeof data.stderr === "string" ? data.stderr : "";
+    const outputChanged =
+      stdout !== beforeStdout || stderr !== beforeStderr;
+    const newPrompt =
+      observation.state === "waiting_input" && outputChanged;
+
+    if (terminal || newPrompt) {
+      matched = true;
+      break;
+    }
+    if (Date.now() >= deadline) break;
+
+    await cancellableSleep(pollMs);
+    observation = await observeProcess(processId, tailChars);
+  }
+
+  return {
+    write,
+    matched,
+    timedOut: !matched && Date.now() >= deadline,
+    targetStates: ["waiting_input", "finished", "failed", "lost"],
+    observation,
   };
 }
 
@@ -428,10 +756,11 @@ export async function getProcessOutput(
 export async function killProcess(
   processId: string,
   signal: NodeJS.Signals = "SIGTERM",
+  controlToken?: string,
 ) {
   requireCapability("ALLOW_SHELL", false);
   const record = await reconcileRecord(await readManagedProcess(processId));
-  assertProcessOwner(record);
+  assertProcessOwner(record, controlToken);
 
   if (record.status !== "running" && record.status !== "terminating") {
     return {
@@ -445,10 +774,14 @@ export async function killProcess(
   let sent = false;
   const live = liveChildren.get(processId);
   if (live) {
-    sent = live.child.kill(signal);
+    sent = signalProcessGroup(live.child, signal);
   } else {
     try {
-      process.kill(record.pid, signal);
+      if (process.platform !== "win32") {
+        process.kill(-record.pid, signal);
+      } else {
+        process.kill(record.pid, signal);
+      }
       sent = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;

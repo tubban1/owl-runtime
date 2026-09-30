@@ -78,6 +78,7 @@ export function getActionContract(action: string, args: unknown = {}): ActionCon
       ...STATE_CHANGE,
       riskLevel: action === "fs.delete" ? "high" : "medium",
       sideEffects: [action === "fs.delete" ? "filesystem_delete" : "filesystem_write"],
+      requiresVerification: true,
       resources: pathResource(args, "path", "exclusive"),
     };
   }
@@ -86,6 +87,7 @@ export function getActionContract(action: string, args: unknown = {}): ActionCon
     return {
       ...STATE_CHANGE,
       sideEffects: ["filesystem_write"],
+      requiresVerification: true,
       resources: edits
         .map((e: any) => (typeof e?.path === "string" ? resource(`fs:${e.path}`, "exclusive") : null))
         .filter(Boolean) as ResourceRequirement[],
@@ -97,6 +99,7 @@ export function getActionContract(action: string, args: unknown = {}): ActionCon
     return {
       ...STATE_CHANGE,
       sideEffects: [action === "fs.move" ? "filesystem_move" : "filesystem_copy"],
+      requiresVerification: true,
       resources: [
         ...(source ? [resource(`fs:${source}`, action === "fs.copy" ? "shared" : "exclusive")] : []),
         ...(dest ? [resource(`fs:${dest}`, "exclusive")] : []),
