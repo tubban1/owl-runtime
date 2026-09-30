@@ -2,6 +2,8 @@
 
 OWL Runtime uses explicit capability gates and operating-system permissions.
 
+Cloud account roles and DeviceGrants are upstream control-plane authorization, not Runtime capabilities. See [Cloud Authorization Boundary](cloud-authorization-boundary.md).
+
 ## Filesystem scope
 
 Filesystem operations are limited by configured allowed directories. Runtime-owned staging/state paths are handled separately.
