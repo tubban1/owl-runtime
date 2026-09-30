@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { DatabaseSync, StatementSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import {
   ensureStorageLayout,
   owlLabDataRoot,
@@ -350,9 +350,7 @@ export async function withStorageMetadata<T>(
 ): Promise<T> {
   await ensureStorageLayout(root);
   const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(metadataDbPath(root), {
-    timeout: 5_000,
-  });
+  const db = new DatabaseSync(metadataDbPath(root));
   try {
     initializeSchema(db);
     await importLegacyReferenceIndex(db, root);
