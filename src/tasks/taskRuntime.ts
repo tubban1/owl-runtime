@@ -154,6 +154,72 @@ function resolveReferences(
   return value;
 }
 
+function publicStagedArtifactRefs(task: PersistentTask) {
+  return (task.stagedArtifacts ?? [])
+    .map((artifact) => artifact.artifactRef)
+    .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact));
+}
+
+function publicTaskResult(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(publicTaskResult);
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const object = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(object)) {
+    if (
+      key === "staging" &&
+      child &&
+      typeof child === "object" &&
+      !Array.isArray(child)
+    ) {
+      const staging = child as Record<string, unknown>;
+      if (Array.isArray(staging.artifacts)) {
+        const refs = staging.artifacts
+          .map((artifact) => {
+            if (!artifact || typeof artifact !== "object") return null;
+            const internal = artifact as Record<string, unknown>;
+            return internal.artifactRef &&
+              typeof internal.artifactRef === "object" &&
+              !Array.isArray(internal.artifactRef)
+              ? internal.artifactRef
+              : null;
+          })
+          .filter(Boolean);
+        result.staging = {
+          artifacts: refs,
+          legacyUncommittedArtifactCount:
+            staging.artifacts.length - refs.length,
+        };
+        continue;
+      }
+    }
+    result[key] = publicTaskResult(child);
+  }
+  return result;
+}
+
+function publicTaskEvent(
+  event: PersistentTask["events"][number],
+): PersistentTask["events"][number] {
+  if (event.type === "staging_initialized") {
+    return {
+      ...event,
+      message: "Initialized Runtime-owned task staging.",
+    };
+  }
+  if (event.type === "staging_warning") {
+    return {
+      ...event,
+      message:
+        "Step succeeded, but Runtime-owned artifact staging needs attention; inspect diagnostics locally.",
+    };
+  }
+  return event;
+}
+
 function summarizeTask(task: PersistentTask, includeResults = false) {
   return {
     schemaVersion: 1 as const,
@@ -186,7 +252,11 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       maxConcurrency: task.defaultMaxConcurrency,
       failFast: task.defaultFailFast,
     },
-    storage: getTaskStorageInfo(),
+    storage: {
+      encryptedAtRest: getTaskStorageInfo().encryptedAtRest,
+      algorithm: getTaskStorageInfo().algorithm,
+      internalPathsExposed: false,
+    },
     memoryLayers: {
       working: {
         description:
@@ -195,13 +265,13 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       },
       staging: {
         description:
-          "File-backed intermediate asset staging for task artifacts.",
-        root: task.stagingRoot ?? null,
-        manifestPath: task.stagingManifestPath ?? null,
+          "Runtime-owned mutable staging with immutable CAS-backed ArtifactRef identity.",
         artifactCount: task.stagedArtifacts?.length ?? 0,
+        committedArtifactCount: publicStagedArtifactRefs(task).length,
         bytes:
           task.stagedArtifacts?.reduce((sum, artifact) => sum + artifact.bytes, 0) ??
           0,
+        internalPathsExposed: false,
       },
       episodic: {
         description:
@@ -217,10 +287,12 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
       },
     },
     staging: {
-      root: task.stagingRoot ?? null,
-      manifestPath: task.stagingManifestPath ?? null,
       artifactCount: task.stagedArtifacts?.length ?? 0,
-      artifacts: task.stagedArtifacts ?? [],
+      committedArtifactCount: publicStagedArtifactRefs(task).length,
+      legacyUncommittedArtifactCount:
+        (task.stagedArtifacts?.length ?? 0) - publicStagedArtifactRefs(task).length,
+      artifacts: publicStagedArtifactRefs(task),
+      internalPathsExposed: false,
     },
     steps: task.steps.map((step) => ({
       id: step.id,
@@ -275,9 +347,11 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
             checkedAt: step.verification.checkedAt,
           }
         : null,
-      ...(includeResults ? { result: step.result ?? null } : {}),
+      ...(includeResults
+        ? { result: publicTaskResult(step.result ?? null) }
+        : {}),
     })),
-    events: task.events.slice(-100),
+    events: task.events.slice(-100).map(publicTaskEvent),
   };
 }
 
@@ -390,7 +464,7 @@ async function loadTask(id: string): Promise<PersistentTask> {
     task.stagingRoot = stage.root;
     appendTaskEvent(task, {
       type: "staging_initialized",
-      message: `Initialized task staging at ${stage.root}.`,
+      message: "Initialized Runtime-owned task staging.",
     });
     changed = true;
   }
@@ -519,7 +593,7 @@ export async function createPersistentTask(
   });
   appendTaskEvent(task, {
     type: "staging_initialized",
-    message: `Initialized task staging at ${stage.root}.`,
+    message: "Initialized Runtime-owned task staging.",
   });
 
   await writePersistentTask(task);
@@ -663,7 +737,7 @@ export async function createPersistentPrimitiveTask(
   });
   appendTaskEvent(task, {
     type: "staging_initialized",
-    message: `Initialized task staging at ${stage.root}.`,
+    message: "Initialized Runtime-owned task staging.",
   });
 
   await writePersistentTask(task);
