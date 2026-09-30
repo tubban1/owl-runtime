@@ -51,7 +51,7 @@ StorageRoot
 
 Default local mapping:
 
-- MetadataStore → SQLite
+- MetadataStore → SQLCipher-encrypted SQLite (production default)
 - ObjectStore → content-addressed filesystem
 - StagingStore → mutable filesystem workspace
 - SecretStore → macOS Keychain
@@ -237,14 +237,24 @@ Reconciliation must fail closed for missing/corrupt durable evidence. It must ne
 
 ## Encryption
 
-Storage v1 defines provider abstractions, not a mandatory SQLCipher dependency.
+Production local metadata uses **SQLCipher-encrypted SQLite**. Plain SQLite is not an accepted production backend. The storage abstraction remains provider-neutral so tests and future cloud deployments can use other implementations.
 
-- credentials/secrets → Keychain or cloud secret provider;
-- SQLite → structured non-secret metadata by default;
-- ObjectStore → optional provider-level/per-object encryption;
-- encryption metadata may include KeyRef/key version identifiers.
+Local production requirements:
 
-Do not call SQLite "encrypted" unless an actual database-encryption provider is active.
+- MetadataStore → SQLCipher with authenticated full-database encryption;
+- database key → cryptographically random, device-scoped secret stored in macOS Keychain; never in the database, config files, environment snapshots, logs, or source control;
+- key derivation / cipher parameters → explicit and versioned, without persisting key material;
+- open → fail closed when the key is absent, invalid, or the database cannot be authenticated; never silently fall back to plaintext SQLite;
+- new databases → encrypted from first creation; plaintext-first-then-convert is forbidden for production;
+- existing plaintext metadata → migrate through a verified one-way encrypted-copy workflow, validate integrity and record counts, atomically activate the encrypted database, then mark the plaintext source reclaimable under governed cleanup;
+- key rotation → create/verify a new encrypted generation before activation; interrupted rotation must leave one known-good generation recoverable;
+- credentials/secrets → Keychain or cloud secret provider, not SQLCipher merely because the database is encrypted;
+- backups containing metadata → encrypted with equivalent or stronger protection;
+- temporary SQLite/WAL/SHM files must remain under the protected product data root and must not create plaintext metadata spill files.
+
+SQLCipher protects data at rest against offline copying/theft of the database. It does not protect data after an authorized, unlocked Runtime process has obtained the key. Runtime authorization, OS account security, Keychain access control and least-privilege file permissions remain separate required controls.
+
+ObjectStore payload encryption is a separate concern. Sensitive durable objects should use provider-level or per-object authenticated encryption with versioned KeyRef metadata; the database key must not be reused as an object-encryption key.
 
 ## Legacy migration
 
