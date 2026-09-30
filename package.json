@@ -83,7 +83,8 @@
     "verify:encrypted-metadata-store": "OWL_RUNTIME_MODE=test tsx scripts/verify-encrypted-metadata-store.ts",
     "verify:soak-contention-regression": "OWL_RUNTIME_MODE=test tsx scripts/verify-soak-contention-regression.ts",
     "verify:browser-startup-regression": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-startup-regression.ts",
-    "verify:soak-regressions": "npm run verify:soak-contention-regression && npm run verify:browser-startup-regression"
+    "verify:soak-regressions": "npm run verify:soak-contention-regression && npm run verify:browser-startup-regression",
+    "verify:mcp-session-reconnect": "OWL_RUNTIME_MODE=test tsx scripts/verify-mcp-session-reconnect.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

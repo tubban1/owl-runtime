@@ -103,5 +103,8 @@ jobs:
       - name: Verify Soak Contention Regression
         run: npm run verify:soak-contention-regression
 
+      - name: Verify MCP Session Reconnect
+        run: npm run verify:mcp-session-reconnect
+
       - name: Build Public Types
         run: npm run build:types

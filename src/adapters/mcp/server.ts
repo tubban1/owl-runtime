@@ -2142,8 +2142,31 @@ const sessions = new Map<string, { transport: StreamableHTTPServerTransport; ser
 
 app.all("/mcp", async (req, res) => {
   try {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const rawSessionId = req.headers["mcp-session-id"];
+    const sessionId =
+      typeof rawSessionId === "string" && rawSessionId.trim().length > 0
+        ? rawSessionId.trim()
+        : undefined;
+
+    // Empty session headers from a tunnel reconnect are equivalent to no
+    // session. Do not pass them through to the MCP SDK.
+    if (!sessionId) {
+      delete req.headers["mcp-session-id"];
+    }
+
     let session = sessionId ? sessions.get(sessionId) : undefined;
+
+    // A non-empty session ID from a previous Runtime instance is stale.
+    // Returning 404 lets Streamable HTTP clients re-initialize cleanly instead
+    // of constructing a new transport around an unknown session ID.
+    if (sessionId && !session) {
+      res.status(404).json({
+        jsonrpc: "2.0",
+        error: { code: -32001, message: "Session not found" },
+        id: null,
+      });
+      return;
+    }
 
     if (!session) {
       if (req.method !== "POST") {
