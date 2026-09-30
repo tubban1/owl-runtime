@@ -72,6 +72,18 @@ import {
   type RuntimeEventListRequest,
   type RuntimeEventListResponse,
 } from "../runtime/publicEventJournal.js";
+import {
+  collectPublicStorageGarbage,
+  evaluatePublicStorageRetention,
+  getStorageRuntimeStatus,
+  inventoryPublicLegacyStorage,
+  listPublicStorageArtifacts,
+  migratePublicLegacyStorage,
+  pinPublicStorageArtifact,
+  reconcilePublicStorage,
+  unpinPublicStorageArtifact,
+} from "../storage/storageRuntimeService.js";
+
 export type {
   RuntimePublicEvent,
   RuntimePublicEventType,
@@ -86,6 +98,12 @@ import type {
   PublicDeleteReceiptV1,
   PublicRunReceiptV1,
   PublicScheduleV1,
+  PublicStorageArtifactV1,
+  PublicStorageGcReceiptV1,
+  PublicStorageReconciliationV1,
+  PublicStorageStatusV1,
+  PublicLegacyStorageInventoryV1,
+  PublicLegacyStorageMigrationReceiptV1,
   PublicTaskDetailV1,
   PublicTaskSummaryV1,
 } from "./runtimeDtos.js";
@@ -327,6 +345,48 @@ async function withPublicExecutionTarget<T>(
   );
 }
 
+export type StorageGarbageCollectionRequest = {
+  confirm: boolean;
+  dryRun?: boolean;
+  gracePeriodMs?: number;
+};
+
+export type StorageArtifactRequest = {
+  artifactId: string;
+};
+
+export type LegacyStorageMigrationRequest = {
+  inventory: PublicLegacyStorageInventoryV1;
+  confirm: boolean;
+};
+
+export interface StorageRuntimeClient {
+  getStorageStatus(): Promise<PublicStorageStatusV1>;
+  listStorageArtifacts(): Promise<PublicStorageArtifactV1[]>;
+  reconcileStorage(): Promise<PublicStorageReconciliationV1>;
+  evaluateStorageRetention(): Promise<{
+    schemaVersion: 1;
+    evaluatedAt: string;
+    changed: number;
+    artifacts: PublicStorageArtifactV1[];
+  }>;
+  collectStorageGarbage(
+    request: StorageGarbageCollectionRequest,
+  ): Promise<PublicStorageGcReceiptV1>;
+  pinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1>;
+  unpinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1>;
+  inventoryLegacyStorage(): Promise<PublicLegacyStorageInventoryV1>;
+  migrateLegacyStorage(
+    request: LegacyStorageMigrationRequest,
+  ): Promise<PublicLegacyStorageMigrationReceiptV1>;
+}
+
+export type RuntimeClientWithStorage = RuntimeClient & StorageRuntimeClient;
+
 export interface RuntimeEventRuntimeClient {
   listEvents(
     request?: RuntimeEventListRequest,
@@ -409,13 +469,57 @@ export interface RuntimeClient {
  * External products MUST depend on RuntimeClient semantics, not import Runtime
  * internals. IPC/HTTP implementations should preserve this interface.
  */
-export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient {
+export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeClient, WorkflowDiscoveryRuntimeClient, RuntimeEventRuntimeClient, StorageRuntimeClient {
   async info(): Promise<RuntimeClientInfo> {
     return {
       apiVersion: RUNTIME_PUBLIC_API_VERSION,
       runtimeVersion: RUNTIME_VERSION,
       transport: "in-process",
     };
+  }
+
+  async getStorageStatus(): Promise<PublicStorageStatusV1> {
+    return await getStorageRuntimeStatus();
+  }
+
+  async listStorageArtifacts(): Promise<PublicStorageArtifactV1[]> {
+    return await listPublicStorageArtifacts();
+  }
+
+  async reconcileStorage(): Promise<PublicStorageReconciliationV1> {
+    return await reconcilePublicStorage();
+  }
+
+  async evaluateStorageRetention() {
+    return await evaluatePublicStorageRetention();
+  }
+
+  async collectStorageGarbage(
+    request: StorageGarbageCollectionRequest,
+  ): Promise<PublicStorageGcReceiptV1> {
+    return await collectPublicStorageGarbage(request);
+  }
+
+  async pinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1> {
+    return await pinPublicStorageArtifact(request.artifactId);
+  }
+
+  async unpinStorageArtifact(
+    request: StorageArtifactRequest,
+  ): Promise<PublicStorageArtifactV1> {
+    return await unpinPublicStorageArtifact(request.artifactId);
+  }
+
+  async inventoryLegacyStorage(): Promise<PublicLegacyStorageInventoryV1> {
+    return await inventoryPublicLegacyStorage();
+  }
+
+  async migrateLegacyStorage(
+    request: LegacyStorageMigrationRequest,
+  ): Promise<PublicLegacyStorageMigrationReceiptV1> {
+    return await migratePublicLegacyStorage(request);
   }
 
   async listEvents(
