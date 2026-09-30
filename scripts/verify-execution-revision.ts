@@ -24,10 +24,13 @@ const request = {
 };
 
 try {
+  console.error("[execution-revision] checkpoint=capabilities:start");
   const capabilities = await client.getCapabilities("execution revision");
   assert.equal(capabilities.extensions.executionRevision.version, 1);
+  console.error("[execution-revision] checkpoint=capabilities:done");
 
   const created = await client.createTask(request);
+  console.error("[execution-revision] checkpoint=create:first");
   assert.equal(created.status, "pending");
   assert.equal(created.executionRevision.version, 1);
   assert.match(created.executionRevision.digest, /^[a-f0-9]{64}$/);
@@ -35,6 +38,7 @@ try {
 
   const reread = await client.getTask(created.id);
   assert.equal(reread.executionRevision.digest, digest);
+  console.error("[execution-revision] checkpoint=reread:first");
 
   await assert.rejects(
     () =>
@@ -49,7 +53,9 @@ try {
   const afterMismatch = await client.getTask(created.id);
   assert.equal(afterMismatch.status, "pending");
   assert.equal(afterMismatch.runCount, 0);
+  console.error("[execution-revision] checkpoint=mismatch:rejected");
 
+  console.error("[execution-revision] checkpoint=run:start");
   const completed = await client.runTask({
     taskId: created.id,
     expectedRevisionDigest: digest,
@@ -57,6 +63,7 @@ try {
   assert.equal(completed.status, "completed");
   assert.equal(completed.executionRevision.digest, digest);
   assert.equal(await fs.readFile(path.join(root, "revision.txt"), "utf8"), "bound revision");
+  console.error("[execution-revision] checkpoint=run:completed");
 
   const sameSemantic = await client.createTask({
     ...request,
@@ -70,6 +77,7 @@ try {
     digest,
     "normalized default fields must produce a stable digest",
   );
+  console.error("[execution-revision] checkpoint=create:semantic");
 
   const changed = await client.createTask({
     ...request,
@@ -84,6 +92,7 @@ try {
     ],
   });
   assert.notEqual(changed.executionRevision.digest, digest);
+  console.error("[execution-revision] checkpoint=create:changed");
 
   console.log(
     JSON.stringify(
@@ -100,5 +109,7 @@ try {
     ),
   );
 } finally {
+  console.error("[execution-revision] checkpoint=cleanup:start");
   await fs.rm(root, { recursive: true, force: true });
+  console.error("[execution-revision] checkpoint=cleanup:done");
 }

@@ -30,14 +30,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run verify:request-replay
+      - run: npm run verify:storage-key-provider
+      - run: npm run verify:encrypted-metadata-store
+      - run: npm run verify:storage-metadata-sqlite
       - run: npm run verify:execution-revision
       - run: npm run verify:execution-activation
       - run: npm run verify:approval-resume
       - run: npm run verify:public-dto
       - run: npm run verify:schedule-pause-resume
-      - run: npm run verify:storage-key-provider
-      - run: npm run verify:encrypted-metadata-store
-      - run: npm run verify:storage-metadata-sqlite
       - run: npm run verify:storage-foundation
       - run: npm run verify:storage-retention
       - run: npm run verify:legacy-storage-migration
