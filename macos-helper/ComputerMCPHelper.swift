@@ -57,7 +57,7 @@ func screenCaptureAllowed(request: Bool) -> Bool {
 func helperStatus(prompt: Bool = false) -> [String: Any] {
     return [
         "ok": true,
-        "bundleIdentifier": Bundle.main.bundleIdentifier ?? "fan.fde.computermcp.helper",
+        "bundleIdentifier": Bundle.main.bundleIdentifier ?? "fan.fde.owl.helper",
         "executable": CommandLine.arguments.first ?? "",
         "pid": ProcessInfo.processInfo.processIdentifier,
         "accessibilityTrusted": accessibilityTrusted(prompt: prompt),
@@ -84,7 +84,7 @@ func runningApp(named name: String?) -> NSRunningApplication? {
 
 func applicationElement(named name: String?) throws -> (NSRunningApplication, AXUIElement) {
     guard accessibilityTrusted(prompt: false) else {
-        throw HelperError(message: "Computer MCP Helper does not have macOS Accessibility permission.")
+        throw HelperError(message: "OWL LAB Helper does not have macOS Accessibility permission.")
     }
     guard let app = runningApp(named: name) else {
         throw HelperError(message: "Application not found.")
