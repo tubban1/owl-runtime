@@ -3660,6 +3660,19 @@ export async function getCapabilityManifest(goal = "") {
         frontendUpdatePolicy: "consumer-polls-real-progress",
         transportHoldRequired: false,
       },
+      runtimeAccessState: {
+        version: 1,
+        status: "candidate",
+        states: ["LOCKED", "READY", "REVOKED"],
+        read: "access.get",
+        authorize: "access.authorize",
+        lock: "access.lock",
+        revoke: "access.revoke",
+        productionDefault: "enforced",
+        developmentDefault: "compat",
+        boundedOfflineLease: true,
+        mutationEnforcement: ["public-rpc", "routed-action"],
+      },
       schedulePauseResume: {
         version: 1,
         status: "candidate",
@@ -3764,6 +3777,8 @@ export async function getCapabilityManifest(goal = "") {
         "v0.8 + v0.9.5 Primitive-task path + 1.x detached start/progress projection",
       detachedTaskExecution:
         "1.x candidate: tasks.start returns durable acceptance immediately; tasks.get exposes monotonic real progress so agent frontends do not depend on one long-lived transport request",
+      runtimeAccessState:
+        "1.x candidate: durable LOCKED/READY/REVOKED state + bounded offline lease; public consequential RPC and routed side effects fail closed outside READY",
       persistentScheduler: "v0.9.6 wake scheduler + scheduled Primitive graphs",
       persistentLoopController:
         "v0.9.7 stateful loops + v0.9.9 durable session phases",

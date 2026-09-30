@@ -1,5 +1,6 @@
 import type {
   ActivateExecutionRevisionRequest,
+  AuthorizeRuntimeAccessRequest,
   ApprovalState,
   CreateScheduleRequest,
   CreateTaskFromActivationRequest,
@@ -35,6 +36,10 @@ import type {
 
 export const RUNTIME_RPC_METHODS = [
   "info",
+  "access.get",
+  "access.authorize",
+  "access.lock",
+  "access.revoke",
   "capabilities.get",
   "execution-targets.get",
   "primitives.catalog",
@@ -210,6 +215,20 @@ export async function invokeRuntimeRpc(
   switch (method) {
     case "info":
       return await client.info();
+    case "access.get":
+      return await client.getRuntimeAccessState();
+    case "access.authorize":
+      return await client.authorizeRuntimeAccess(
+        object as AuthorizeRuntimeAccessRequest,
+      );
+    case "access.lock":
+      return await client.lockRuntimeAccess(
+        typeof object.reasonCode === "string" ? object.reasonCode : undefined,
+      );
+    case "access.revoke":
+      return await client.revokeRuntimeAccess(
+        typeof object.reasonCode === "string" ? object.reasonCode : undefined,
+      );
     case "capabilities.get":
       return await client.getCapabilities(
         typeof object.goal === "string" ? object.goal : "",
