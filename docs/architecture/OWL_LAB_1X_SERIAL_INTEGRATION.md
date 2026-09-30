@@ -54,16 +54,18 @@ R3 Tested Activation — complete
 R4 Approval Resume — complete  
 R5 Typed Public DTO — complete  
 R6 Schedule Pause/Resume — green on exact head `17c2b5ecc68d7d042b9309b88b86e653a3a4e35f`  
-R7 Storage Foundation v1 — current phase  
-R8 Retention + GC v1  
-R9 Legacy migration (.computer-mcp / .agentos)  
-R10 Runtime integration freeze
+R7 Storage Foundation v1 — green  
+R8 Retention + GC v1 — green  
+R9 Legacy migration (.computer-mcp / .agentos / .owl-runtime) — green  
+R10 Public storage boundary + ArtifactRef staging + reconciliation — green  
+R11 SQLite MetadataStore authority (state/owl.db) — current phase  
+R12 Runtime integration freeze
 
 Runtime exit gate:
 
 - complete 1.x public DTO surface;
 - all durable state has explicit ownership;
-- no permanent API exposes physical filesystem paths;
+- no durable artifact identity or Runtime-internal storage contract exposes physical filesystem paths;
 - storage migration and reconciliation are tested;
 - CI green on exact integration head;
 - release candidate soak remains isolated from mutable 1.x work.
@@ -150,6 +152,6 @@ For each phase:
 
 ## Current decision
 
-The next mutable development target is **OWL Runtime R7: Storage Foundation v1**.
+The only mutable integration target is **OWL Runtime R11: SQLite MetadataStore authority**.
 
-OWL Desktop and OWL Cloud remain integration consumers until Runtime R10 is frozen. Existing open PRs may be reviewed and rebased for compatibility, but new cross-boundary semantics must not be invented there.
+OWL Desktop and OWL Cloud remain integration consumers until Runtime R12 is frozen. R7–R10 are evidence-pinned and must not be retroactively rewritten. Existing open PRs may be reviewed and rebased for compatibility, but new cross-boundary semantics must not be invented there.
