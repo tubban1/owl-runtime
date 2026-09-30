@@ -62,6 +62,18 @@ import {
   type ApprovalRecord,
 } from "../policy/approvalPolicy.js";
 import { RUNTIME_VERSION } from "../runtime/runtimeVersion.js";
+import {
+  authorizeRuntimeAccess,
+  getRuntimeAccessState,
+  lockRuntimeAccess,
+  revokeRuntimeAccess,
+  type AuthorizeRuntimeAccessRequest,
+  type RuntimeAccessState,
+} from "../runtime/runtimeAccessState.js";
+export type {
+  AuthorizeRuntimeAccessRequest,
+  RuntimeAccessState,
+} from "../runtime/runtimeAccessState.js";
 import { createSupportPackage } from "../diagnostics/supportPackage.js";
 import { withChildExecutionContext } from "../runtime/executionContext.js";
 import {
@@ -430,6 +442,12 @@ export type RuntimeClientWithWorkflowDiscovery =
 
 export interface RuntimeClient {
   info(): Promise<RuntimeClientInfo>;
+  getRuntimeAccessState(): Promise<RuntimeAccessState>;
+  authorizeRuntimeAccess(
+    request: AuthorizeRuntimeAccessRequest,
+  ): Promise<RuntimeAccessState>;
+  lockRuntimeAccess(reasonCode?: string): Promise<RuntimeAccessState>;
+  revokeRuntimeAccess(reasonCode?: string): Promise<RuntimeAccessState>;
 
   getCapabilities(goal?: string): Promise<unknown>;
   getExecutionTargets(): Promise<unknown>;
@@ -481,6 +499,24 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
       runtimeVersion: RUNTIME_VERSION,
       transport: "in-process",
     };
+  }
+
+  async getRuntimeAccessState(): Promise<RuntimeAccessState> {
+    return await getRuntimeAccessState();
+  }
+
+  async authorizeRuntimeAccess(
+    request: AuthorizeRuntimeAccessRequest,
+  ): Promise<RuntimeAccessState> {
+    return await authorizeRuntimeAccess(request);
+  }
+
+  async lockRuntimeAccess(reasonCode?: string): Promise<RuntimeAccessState> {
+    return await lockRuntimeAccess(reasonCode);
+  }
+
+  async revokeRuntimeAccess(reasonCode?: string): Promise<RuntimeAccessState> {
+    return await revokeRuntimeAccess(reasonCode);
   }
 
   async getStorageStatus(): Promise<PublicStorageStatusV1> {

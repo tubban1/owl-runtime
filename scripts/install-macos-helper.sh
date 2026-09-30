@@ -5,8 +5,8 @@ ROOT="${0:A:h}/.."
 SRC="$ROOT/macos-helper/ComputerMCPHelper.swift"
 PLIST="$ROOT/macos-helper/Info.plist"
 BUILD="$ROOT/build/macos-helper"
-APP="$BUILD/Computer MCP Helper.app"
-INSTALL_APP="$HOME/Applications/Computer MCP Helper.app"
+APP="$BUILD/OWL LAB Helper.app"
+INSTALL_APP="$HOME/Applications/OWL LAB Helper.app"
 SOCKET="$HOME/.computer-mcp/helper.sock"
 
 pkill -f "$INSTALL_APP/Contents/MacOS/ComputerMCPHelper" 2>/dev/null || true
@@ -49,7 +49,7 @@ echo "Unix socket:"
 ls -l "$SOCKET" 2>/dev/null || echo "  helper socket not ready"
 echo
 echo "The helper is now launched by macOS LaunchServices, not by your IDE/Terminal."
-echo "Grant permissions to 'Computer MCP Helper' in:"
+echo "Grant permissions to 'OWL LAB Helper' in:"
 echo "  System Settings → Privacy & Security → Accessibility"
 echo "  System Settings → Privacy & Security → Screen & System Audio Recording"
 echo

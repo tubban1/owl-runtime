@@ -7,19 +7,19 @@
   <key>CFBundleExecutable</key>
   <string>ComputerMCPHelper</string>
   <key>CFBundleIdentifier</key>
-  <string>fan.fde.computermcp.helper</string>
+  <string>fan.fde.owl.helper</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Computer MCP Helper</string>
+  <string>OWL LAB Helper</string>
   <key>CFBundleDisplayName</key>
-  <string>Computer MCP Helper</string>
+  <string>OWL LAB Helper</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.2.0</string>
+  <string>1.0.0</string>
   <key>CFBundleVersion</key>
-  <string>4</string>
+  <string>1</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSHighResolutionCapable</key>

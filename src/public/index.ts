@@ -3,6 +3,8 @@ export {
   InProcessRuntimeClient,
   type RuntimeClient,
   type RuntimeClientInfo,
+  type AuthorizeRuntimeAccessRequest,
+  type RuntimeAccessState,
   type RuntimeTransport,
   type PublicExecutionTarget,
   type PublicVerificationOperator,

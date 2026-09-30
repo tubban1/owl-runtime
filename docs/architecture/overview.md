@@ -139,7 +139,7 @@ Current providers:
 - Transaction
 - Browser / Chrome CDP
 - macOS Desktop
-- Computer MCP Helper.app
+- OWL LAB Helper.app
 
 Providers translate Actions into real platform behavior.
 

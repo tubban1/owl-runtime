@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   RUNTIME_PUBLIC_API_VERSION,
   type ActivateExecutionRevisionRequest,
+  type AuthorizeRuntimeAccessRequest,
   type ApprovalState,
   type CreateScheduleRequest,
   type CreateTaskFromActivationRequest,
@@ -15,6 +16,7 @@ import {
   type StartTaskRequest,
   type RuntimeClient,
   type RuntimeClientInfo,
+  type RuntimeAccessState,
   type RuntimeEventRuntimeClient,
   type RuntimeEventListRequest,
   type RuntimeEventListResponse,
@@ -211,6 +213,28 @@ export class HttpRuntimeClient implements RuntimeClient, UserSkillRuntimeClient,
       ...info,
       transport: "http",
     };
+  }
+
+  async getRuntimeAccessState(): Promise<RuntimeAccessState> {
+    return await this.rpc<RuntimeAccessState>("access.get");
+  }
+
+  async authorizeRuntimeAccess(
+    request: AuthorizeRuntimeAccessRequest,
+  ): Promise<RuntimeAccessState> {
+    return await this.rpc<RuntimeAccessState>("access.authorize", request);
+  }
+
+  async lockRuntimeAccess(reasonCode?: string): Promise<RuntimeAccessState> {
+    return await this.rpc<RuntimeAccessState>("access.lock", {
+      ...(reasonCode ? { reasonCode } : {}),
+    });
+  }
+
+  async revokeRuntimeAccess(reasonCode?: string): Promise<RuntimeAccessState> {
+    return await this.rpc<RuntimeAccessState>("access.revoke", {
+      ...(reasonCode ? { reasonCode } : {}),
+    });
   }
 
   async listEvents(

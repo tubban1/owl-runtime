@@ -2,6 +2,7 @@ import { runtimeStatePath } from "../runtime/runtimePaths.js";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
@@ -24,7 +25,7 @@ export type DesktopUiElement = {
 function requireDesktopEnabled(): void {
   if (!envFlag("ALLOW_GUI", false)) {
     throw new Error(
-      "Desktop provider is disabled. Set ALLOW_GUI=true and restart computer-mcp.",
+      "Desktop provider is disabled. Set ALLOW_GUI=true and restart OWL Runtime.",
     );
   }
   if (process.platform !== "darwin") {
@@ -33,14 +34,29 @@ function requireDesktopEnabled(): void {
 }
 
 function helperAppPath(): string {
-  return (
-    process.env.COMPUTER_MCP_HELPER_APP?.trim() ||
-    path.join(os.homedir(), "Applications", "Computer MCP Helper.app")
+  const configured =
+    process.env.OWL_HELPER_APP?.trim() ||
+    process.env.COMPUTER_MCP_HELPER_APP?.trim();
+  if (configured) return configured;
+
+  const preferred = path.join(
+    os.homedir(),
+    "Applications",
+    "OWL LAB Helper.app",
   );
+  if (fsSync.existsSync(preferred)) return preferred;
+
+  const legacy = path.join(
+    os.homedir(),
+    "Applications",
+    "Computer MCP Helper.app",
+  );
+  return fsSync.existsSync(legacy) ? legacy : preferred;
 }
 
 function helperSocketPath(): string {
   return (
+    process.env.OWL_HELPER_SOCKET?.trim() ||
     process.env.COMPUTER_MCP_HELPER_SOCKET?.trim() ||
     runtimeStatePath("helper.sock")
   );
@@ -117,7 +133,7 @@ async function runWithInput(command: string, args: string[], input: string) {
 async function launchHelper(): Promise<void> {
   if (!(await helperInstalled())) {
     throw new Error(
-      `Computer MCP Helper is not installed at ${helperAppPath()}. Run scripts/install-macos-helper.sh.`,
+      `OWL LAB Helper is not installed at ${helperAppPath()}. Run scripts/install-macos-helper.sh.`,
     );
   }
 
@@ -134,7 +150,7 @@ async function launchHelper(): Promise<void> {
   ]);
   if (result.exitCode !== 0) {
     throw new Error(
-      result.stderr.trim() || "Could not launch Computer MCP Helper.",
+      result.stderr.trim() || "Could not launch OWL LAB Helper.",
     );
   }
 
@@ -143,7 +159,7 @@ async function launchHelper(): Promise<void> {
     if (await socketExists()) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("Computer MCP Helper did not create its Unix socket.");
+  throw new Error("OWL LAB Helper did not create its Unix socket.");
 }
 
 async function sendHelperRequestOnce(
@@ -167,7 +183,7 @@ async function sendHelperRequestOnce(
 
     const timer = setTimeout(() => {
       finishError(
-        new Error(`Computer MCP Helper timed out during ${action}.`),
+        new Error(`OWL LAB Helper timed out during ${action}.`),
       );
     }, timeoutMs);
 
@@ -191,7 +207,7 @@ async function sendHelperRequestOnce(
           reject(
             new Error(
               payload?.error ||
-                `Computer MCP Helper failed during ${action}.`,
+                `OWL LAB Helper failed during ${action}.`,
             ),
           );
           return;
@@ -201,7 +217,7 @@ async function sendHelperRequestOnce(
         reject(
           error instanceof Error
             ? error
-            : new Error("Could not parse Computer MCP Helper response."),
+            : new Error("Could not parse OWL LAB Helper response."),
         );
       }
     });
@@ -219,7 +235,7 @@ async function helperRequest(
 ): Promise<any> {
   requireDesktopEnabled();
   if (helperMode() === "disabled") {
-    throw new Error("Computer MCP Helper is disabled by MACOS_HELPER_MODE.");
+    throw new Error("OWL LAB Helper is disabled by MACOS_HELPER_MODE.");
   }
 
   const autoLaunch = options?.autoLaunch !== false;
@@ -227,7 +243,7 @@ async function helperRequest(
 
   if (!(await socketExists())) {
     if (!autoLaunch) {
-      throw new Error("Computer MCP Helper is not running.");
+      throw new Error("OWL LAB Helper is not running.");
     }
     await launchHelper();
   }
@@ -389,7 +405,7 @@ class DesktopProvider implements ComputerProvider {
         helperSocketPath: helperSocketPath(),
         helper,
         note:
-          "v0.9.2 prefers the standalone Computer MCP Helper.app, so Accessibility and Screen Recording permissions belong to the helper rather than the IDE/Terminal that launched computer-mcp.",
+          "OWL Runtime prefers the standalone OWL LAB Helper.app, so Accessibility and Screen Recording permissions belong to the helper rather than the IDE/Terminal that launched Runtime.",
       },
     };
   }
@@ -1037,7 +1053,7 @@ class DesktopProvider implements ComputerProvider {
 
     if (helperMode() === "disabled" || !(await helperInstalled())) {
       throw new Error(
-        "Background window capture requires Computer MCP Helper. Install/update it with scripts/install-macos-helper.sh.",
+        "Background window capture requires OWL LAB Helper. Install/update it with scripts/install-macos-helper.sh.",
       );
     }
 
@@ -1062,7 +1078,7 @@ class DesktopProvider implements ComputerProvider {
 
     if (helperMode() === "disabled" || !(await helperInstalled())) {
       throw new Error(
-        "Background window OCR requires Computer MCP Helper. Install/update it with scripts/install-macos-helper.sh.",
+        "Background window OCR requires OWL LAB Helper. Install/update it with scripts/install-macos-helper.sh.",
       );
     }
 

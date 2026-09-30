@@ -56,6 +56,7 @@ import {
 import { currentExecutionContext } from "../runtime/executionContext.js";
 import { assertProviderAffinity } from "../runtime/executionTarget.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
+import { assertRuntimeMutationAllowed } from "../runtime/runtimeAccessState.js";
 import {
   defaultVerificationForAction,
   observeRoutedActionOutcome,
@@ -512,13 +513,13 @@ const actions = {
   },
   "desktop.helper_status": {
     provider: "desktop",
-    description: "Read the standalone Computer MCP Helper.app runtime and permission status.",
+    description: "Read the standalone OWL LAB Helper.app runtime and permission status.",
     schema: noArgs,
     run: () => desktopProvider.helperStatus(),
   },
   "desktop.helper_request_permissions": {
     provider: "desktop",
-    description: "Ask macOS to grant Accessibility and Screen Recording permissions to Computer MCP Helper.app.",
+    description: "Ask macOS to grant Accessibility and Screen Recording permissions to OWL LAB Helper.app.",
     schema: noArgs,
     destructive: true,
     run: () => desktopProvider.helperRequestPermissions(),
@@ -560,7 +561,7 @@ const actions = {
   "desktop.screenshot_window": {
     provider: "desktop",
     description:
-      "Capture a specific application's main macOS window without bringing it to the foreground. Requires Computer MCP Helper.",
+      "Capture a specific application's main macOS window without bringing it to the foreground. Requires OWL LAB Helper.",
     schema: z.object({
       path: z.string(),
       app_name: z.string().min(1).optional(),
@@ -571,7 +572,7 @@ const actions = {
   "desktop.ocr_window": {
     provider: "desktop",
     description:
-      "Capture and OCR a specific application's main macOS window without bringing it to the foreground. Requires Computer MCP Helper.",
+      "Capture and OCR a specific application's main macOS window without bringing it to the foreground. Requires OWL LAB Helper.",
     schema: z.object({
       path: z.string(),
       app_name: z.string().min(1).optional(),
@@ -796,6 +797,9 @@ export async function executeRoutedAction(
     definition.provider,
     executionContext.executionTarget,
   );
+  if (contract.sideEffects.length > 0) {
+    await assertRuntimeMutationAllowed();
+  }
   const approval = await authorizeAction(action, parsed, contract);
   const lifecycleMutation =
     contract.sideEffects.length > 0
