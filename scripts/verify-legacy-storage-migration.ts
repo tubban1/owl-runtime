@@ -58,6 +58,10 @@ try {
   assert.equal(discardable.length, 1);
   assert.equal(review.length, 2);
   assert.equal(inventory.items.some((item) => path.isAbsolute(item.relativePath)), false);
+  assert.equal(
+    inventory.items.some((item) => item.relativePath.endsWith("proof-link.bin")),
+    false,
+  );
 
   await assert.rejects(
     () =>
@@ -69,6 +73,22 @@ try {
       }),
     /CONFIRM_REQUIRED/,
   );
+
+  const changedItem = migrateItems[0]!;
+  const changedRoot = roots[changedItem.source];
+  const changedPath = path.join(changedRoot, changedItem.relativePath);
+  await fs.writeFile(changedPath, "changed after inventory");
+  await assert.rejects(
+    () =>
+      migrateLegacyStorage({
+        inventory,
+        roots,
+        storageRoot,
+        confirm: true,
+      }),
+    /CHANGED_SINCE_INVENTORY/,
+  );
+  await fs.writeFile(changedPath, "duplicate durable bytes");
 
   const receipt = await migrateLegacyStorage({
     inventory,
