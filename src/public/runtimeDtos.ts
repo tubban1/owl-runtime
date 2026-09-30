@@ -211,6 +211,132 @@ export type PublicArtifactRefV1 = {
   };
 };
 
+export type PublicStorageLifecycleV1 =
+  | "ACTIVE"
+  | "EXPIRED"
+  | "RECLAIMABLE"
+  | "GC_PENDING"
+  | "PINNED"
+  | "AUDIT_HOLD"
+  | "DELETED";
+
+export type PublicStorageArtifactV1 = {
+  schemaVersion: 1;
+  artifact: PublicArtifactRefV1;
+  lifecycle: PublicStorageLifecycleV1;
+  expiresAt: string | null;
+  reclaimableAt: string | null;
+  pinnedAt: string | null;
+  holdReason: string | null;
+};
+
+export type PublicStorageStatusV1 = {
+  schemaVersion: 1;
+  foundationVersion: 1;
+  retentionVersion: 1;
+  reconciliationVersion: 1;
+  health: "healthy" | "degraded" | "needs_attention";
+  usage: {
+    logicalReferenceCount: number;
+    uniqueReferencedObjectCount: number;
+    uniqueReferencedBytes: number;
+    unreferencedObjectCount: number;
+    unreferencedBytes: number;
+    staleStagingCount: number;
+  };
+  lifecycleCounts: Record<string, number>;
+  retentionClassCounts: Record<string, number>;
+  retentionDefaultsMs: Record<PublicArtifactRetentionClassV1, number | null>;
+  internalPathsExposed: false;
+};
+
+export type PublicStorageReconciliationV1 = {
+  version: 1;
+  checkedAt: string;
+  health: "healthy" | "degraded" | "needs_attention";
+  referencedObjectCount: number;
+  physicalObjectCount: number;
+  missingReferences: Array<{
+    artifactId: string;
+    objectId: string;
+    digest: string;
+  }>;
+  corruptObjects: Array<{
+    objectId: string;
+    digest: string;
+    reason: string;
+  }>;
+  unreferencedObjects: Array<{
+    objectId: string;
+    digest: string;
+    sizeBytes: number;
+  }>;
+  staleStaging: Array<{
+    taskId: string;
+    ageMs: number;
+  }>;
+  internalPathsExposed: false;
+};
+
+export type PublicStorageGcReceiptV1 = {
+  schemaVersion: 1;
+  evaluatedAt: string;
+  dryRun: boolean;
+  retiredReferenceIds: string[];
+  deletedObjectIds: string[];
+  reclaimedBytes: number;
+  retainedSharedObjectIds: string[];
+};
+
+export type PublicLegacyStorageInventoryItemV1 = {
+  version: 1;
+  source: "computer-mcp" | "agentos" | "owl-runtime";
+  relativePath: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  inferredType: string;
+  digest: `sha256:${string}`;
+  migrationDecision: "migrate" | "discardable" | "review";
+  retentionClass: PublicArtifactRetentionClassV1 | null;
+  confidence: number;
+};
+
+export type PublicLegacyStorageInventoryV1 = {
+  version: 1;
+  createdAt: string;
+  roots: Array<{
+    source: "computer-mcp" | "agentos" | "owl-runtime";
+    exists: boolean;
+    fileCount: number;
+    sizeBytes: number;
+  }>;
+  items: PublicLegacyStorageInventoryItemV1[];
+  totals: {
+    bytes: number;
+    migrateBytes: number;
+    discardableBytes: number;
+    reviewBytes: number;
+  };
+};
+
+export type PublicLegacyStorageMigrationReceiptV1 = {
+  version: 1;
+  migratedAt: string;
+  confirmed: true;
+  migrated: Array<{
+    source: "computer-mcp" | "agentos" | "owl-runtime";
+    relativePath: string;
+    artifact: PublicArtifactRefV1;
+  }>;
+  objectIds: string[];
+  migratedBytes: number;
+  uniqueObjectBytes: number;
+  deduplicatedBytes: number;
+  reclaimableLegacyBytes: number;
+  reviewBytes: number;
+  legacyDeleted: false;
+};
+
 export type PublicDeleteReceiptV1 = {
   schemaVersion: 1;
   id: string;
