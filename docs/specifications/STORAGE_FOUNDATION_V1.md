@@ -51,7 +51,7 @@ StorageRoot
 
 Default local mapping:
 
-- MetadataStore → SQLCipher-encrypted SQLite (production default)
+- MetadataStore → SQLCipher-compatible encrypted SQLite via SQLite3MultipleCiphers (production default)
 - ObjectStore → content-addressed filesystem
 - StagingStore → mutable filesystem workspace
 - SecretStore → macOS Keychain
@@ -68,7 +68,7 @@ state/owl.db
 
 It stores Storage schema migrations, CAS object identity/state, logical Artifact references, retention lifecycle and storage settings. The legacy `state/storage-references.json` format is an import source only: it is imported idempotently into SQLite and retained until governed cleanup.
 
-Runtime 1.x requires Node.js **22.13.0 or newer** so the built-in `node:sqlite` provider can be used without a native third-party database dependency. Compatibility is gated on the minimum baseline and current Node 24.
+Runtime 1.x keeps the Node.js **22.13.0 or newer** baseline, gated at the minimum baseline and current Node 24. Production local metadata additionally requires the native `better-sqlite3-multiple-ciphers` binding configured for the SQLCipher-compatible `legacy=4` profile. Development/test fixtures may use plaintext SQLite semantics, but production must fail closed if the encrypted provider cannot authenticate.
 
 SQLite metadata contains no credentials or secret tokens. Secrets remain in Keychain or a cloud secret provider. Plain SQLite must not be described as database-level encrypted.
 
@@ -239,22 +239,22 @@ Reconciliation must fail closed for missing/corrupt durable evidence. It must ne
 
 See also: `ENCRYPTED_METADATA_STORE_V1.md` for the normative production encryption and migration gate.
 
-Production local metadata uses **SQLCipher-encrypted SQLite**. Plain SQLite is not an accepted production backend. The storage abstraction remains provider-neutral so tests and future cloud deployments can use other implementations.
+Production local metadata uses **SQLCipher-compatible encrypted SQLite** through SQLite3MultipleCiphers with the explicit `cipher=sqlcipher`, `legacy=4` profile. This describes the on-disk compatibility mode, not a claim that OWL Runtime links the Zetetic SQLCipher library. Plain SQLite is not an accepted production backend. The storage abstraction remains provider-neutral so tests and future cloud deployments can use other implementations.
 
 Local production requirements:
 
-- MetadataStore → SQLCipher with authenticated full-database encryption;
+- MetadataStore → SQLite3MultipleCiphers in the SQLCipher-compatible `legacy=4` full-database encryption profile;
 - database key → cryptographically random, device-scoped secret stored in macOS Keychain; never in the database, config files, environment snapshots, logs, or source control;
 - key derivation / cipher parameters → explicit and versioned, without persisting key material;
 - open → fail closed when the key is absent, invalid, or the database cannot be authenticated; never silently fall back to plaintext SQLite;
 - new databases → encrypted from first creation; plaintext-first-then-convert is forbidden for production;
-- existing plaintext metadata → migrate through a verified one-way encrypted-copy workflow, validate integrity and record counts, atomically activate the encrypted database, then mark the plaintext source reclaimable under governed cleanup;
-- key rotation → create/verify a new encrypted generation before activation; interrupted rotation must leave one known-good generation recoverable;
+- existing plaintext metadata → migrate through a verified encrypted-copy workflow, validate integrity and record counts, atomically activate the encrypted database, retain the plaintext source only as operation-scoped recovery state during activation, then remove it immediately after successful encrypted reopen/verification;
+- key rotation → stage a new Keychain key, create/verify a new encrypted generation before activation, retain old key + old generation as operation-scoped recovery state, and roll both back together on activation failure;
 - credentials/secrets → Keychain or cloud secret provider, not SQLCipher merely because the database is encrypted;
 - backups containing metadata → encrypted with equivalent or stronger protection;
 - temporary SQLite/WAL/SHM files must remain under the protected product data root and must not create plaintext metadata spill files.
 
-SQLCipher protects data at rest against offline copying/theft of the database. It does not protect data after an authorized, unlocked Runtime process has obtained the key. Runtime authorization, OS account security, Keychain access control and least-privilege file permissions remain separate required controls.
+The SQLCipher-compatible encrypted database protects data at rest against offline copying/theft of the database. It does not protect data after an authorized, unlocked Runtime process has obtained the key. Runtime authorization, OS account security, Keychain access control and least-privilege file permissions remain separate required controls.
 
 ObjectStore payload encryption is a separate concern. Sensitive durable objects should use provider-level or per-object authenticated encryption with versioned KeyRef metadata; the database key must not be reused as an object-encryption key.
 
@@ -335,7 +335,7 @@ S8 Desktop Storage contract
 S9 migration/integration tests  
 S10 SQLite MetadataStore authority + legacy JSON import  
 S11 Runtime storage/public contract freeze
-S12 SQLCipher production MetadataStore + Keychain key authority + encrypted migration/conformance
+S12 SQLCipher-compatible production MetadataStore + Keychain key authority + encrypted migration/conformance
 S13 Desktop Storage Manager product integration (OWL Desktop 1.0)
 
 S13 starts only after S12 is green on the exact Runtime integration SHA. Desktop 1.0 release is not storage-management complete until its Storage Manager consumer passes the Runtime contract/E2E gate. The Desktop UI may perform user-visible delete/cleanup actions only by requesting Runtime dry-run/confirmed GC; it never directly unlinks Runtime-owned storage or mutates `owl.db`.

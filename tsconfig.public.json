@@ -6,5 +6,8 @@
     "emitDeclarationOnly": true,
     "outDir": "dist"
   },
-  "include": ["src/public/**/*.ts"]
+  "include": [
+    "src/public/**/*.ts",
+    "src/types/**/*.d.ts"
+  ]
 }

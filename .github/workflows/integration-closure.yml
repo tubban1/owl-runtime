@@ -94,5 +94,11 @@ jobs:
       - name: Verify SQLite Metadata Store
         run: npm run verify:storage-metadata-sqlite
 
+      - name: Verify Metadata Key Authority
+        run: npm run verify:storage-key-provider
+
+      - name: Verify Encrypted Metadata Store
+        run: npm run verify:encrypted-metadata-store
+
       - name: Build Public Types
         run: npm run build:types

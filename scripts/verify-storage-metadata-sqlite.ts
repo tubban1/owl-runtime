@@ -154,6 +154,8 @@ try {
     database: "state/owl.db",
     absolutePathExposed: false,
     secretsStoredHere: false,
+    encryptedAtRest: false,
+    cipherProfile: null,
   });
   assert.equal(JSON.stringify(status).includes(root), false);
 

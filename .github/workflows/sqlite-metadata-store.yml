@@ -1,4 +1,4 @@
-name: 1.x SQLite Metadata Store Gate
+name: 1.x Encrypted Metadata Store Gate
 
 on:
   push:
@@ -41,6 +41,8 @@ jobs:
       - run: npm run verify:legacy-storage-migration
       - run: npm run verify:runtime-integration-freeze
       - run: npm run verify:storage-metadata-sqlite
+      - run: npm run verify:storage-key-provider
+      - run: npm run verify:encrypted-metadata-store
       - run: npm run verify:public-runtime-client
       - run: npm run verify:http-runtime-client
       - run: npm run build:types

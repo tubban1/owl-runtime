@@ -18,6 +18,7 @@ import {
 } from "./storageReconciliation.js";
 import {
   STORAGE_METADATA_SCHEMA_VERSION,
+  STORAGE_METADATA_CIPHER_PROFILE,
 } from "./storageMetadataStore.js";
 
 function publicReference(reference: StorageReference) {
@@ -65,6 +66,11 @@ export async function getStorageRuntimeStatus() {
       database: "state/owl.db" as const,
       absolutePathExposed: false as const,
       secretsStoredHere: false as const,
+      encryptedAtRest: process.env.OWL_RUNTIME_MODE === "production",
+      cipherProfile:
+        process.env.OWL_RUNTIME_MODE === "production"
+          ? STORAGE_METADATA_CIPHER_PROFILE
+          : null,
     },
     health: reconciliation.health,
     usage: {

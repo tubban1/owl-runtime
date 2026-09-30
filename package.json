@@ -79,10 +79,12 @@
     "verify:storage-metadata-sqlite": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-metadata-sqlite.ts",
     "verify:runtime-integration-freeze": "OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-integration-freeze.ts",
     "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts",
-    "verify:storage-key-provider": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-key-provider.ts"
+    "verify:storage-key-provider": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-key-provider.ts",
+    "verify:encrypted-metadata-store": "OWL_RUNTIME_MODE=test tsx scripts/verify-encrypted-metadata-store.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "playwright-core": "^1.63.0",

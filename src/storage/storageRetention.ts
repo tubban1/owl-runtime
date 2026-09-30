@@ -1,4 +1,3 @@
-import type { DatabaseSync } from "node:sqlite";
 import fs from "node:fs/promises";
 import {
   artifactObjectPath,
@@ -15,6 +14,7 @@ import {
   putReferenceRow,
   withStorageMetadata,
   type StorageObjectRecord,
+  type StorageMetadataDatabase,
 } from "./storageMetadataStore.js";
 
 export const STORAGE_REFERENCE_INDEX_VERSION = 1 as const;
@@ -89,7 +89,7 @@ function cloneReference(reference: StorageReference): StorageReference {
 }
 
 async function transaction<T>(
-  db: DatabaseSync,
+  db: StorageMetadataDatabase,
   operation: () => Promise<T> | T,
 ): Promise<T> {
   db.exec("BEGIN IMMEDIATE");

@@ -253,6 +253,8 @@ export type PublicStorageStatusV1 = {
     database: "state/owl.db";
     absolutePathExposed: false;
     secretsStoredHere: false;
+    encryptedAtRest: boolean;
+    cipherProfile: "sqlcipher-legacy4" | null;
   };
   health: "healthy" | "degraded" | "needs_attention";
   usage: {
