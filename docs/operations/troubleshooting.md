@@ -42,7 +42,7 @@ Recent Chrome versions or a busy macOS session can take tens of seconds before t
 
 ## WeChat background OCR fails
 
-Check macOS permissions for Computer MCP Helper:
+Check macOS permissions for OWL LAB Helper:
 
 - Accessibility
 - Screen & System Audio Recording

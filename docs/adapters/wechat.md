@@ -34,7 +34,7 @@ wechat_session_...
 
 Default suggested polling interval is 30 seconds.
 
-Binding and probing first try the background path. If the currently visible WeChat conversation header already matches the requested contact, binding completes with zero focus interruption. A probe never activates WeChat. The native Computer MCP Helper finds the WeChat process' primary CGWindow, captures it by window ID, and performs Apple Vision OCR.
+Binding and probing first try the background path. If the currently visible WeChat conversation header already matches the requested contact, binding completes with zero focus interruption. A probe never activates WeChat. The native OWL LAB Helper finds the WeChat process' primary CGWindow, captures it by window ID, and performs Apple Vision OCR.
 
 If the OCR header still matches the bound contact and the visible conversation digest has not changed, the Runtime does nothing else.
 
@@ -121,7 +121,7 @@ delete
 
 ## macOS permissions
 
-Background capture/OCR requires Computer MCP Helper permission for Screen & System Audio Recording. Foreground navigation/send also requires Accessibility.
+Background capture/OCR requires OWL LAB Helper permission for Screen & System Audio Recording. Foreground navigation/send also requires Accessibility.
 
 Reinstalling or re-signing the Helper may cause macOS to require those permissions to be granted again.
 
