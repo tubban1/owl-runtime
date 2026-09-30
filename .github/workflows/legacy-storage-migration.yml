@@ -1,0 +1,33 @@
+name: 1.x Legacy Storage Migration Gate
+
+on:
+  push:
+    branches:
+      - feature/1.x-storage-legacy-migration
+  pull_request:
+    branches:
+      - feature/1.x-storage-retention-gc
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-storage-migration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  legacy-storage-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run verify:storage-foundation
+      - run: npm run verify:storage-retention
+      - run: npm run verify:legacy-storage-migration
+      - run: npm run build:types
