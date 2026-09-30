@@ -3674,6 +3674,15 @@ export async function getCapabilityManifest(goal = "") {
         pinSupported: true,
         auditHoldSupported: true,
       },
+      legacyStorageMigration: {
+        version: 1,
+        status: "candidate",
+        sources: [".computer-mcp", ".agentos", ".owl-runtime"],
+        inventoryReadOnly: true,
+        digestVerified: true,
+        deletesLegacyData: false,
+        unknownRequiresReview: true,
+      },
     },
     architecture: {
       name: identity.productName,
