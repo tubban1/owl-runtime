@@ -3,6 +3,9 @@
   "version": "1.0.0-rc.4",
   "private": false,
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "PORT=${PORT:-8788} OWL_RUNTIME_MODE=development OWL_STATE_ROOT=${AGENTOS_STATE_ROOT:-$HOME/.owl-runtime-dev} tsx watch src/server.ts",
     "dev:mcp": "PORT=${PORT:-8789} OWL_RUNTIME_MODE=development OWL_STATE_ROOT=${AGENTOS_STATE_ROOT:-$HOME/.owl-runtime-dev} tsx watch src/mcp-server.ts",
@@ -73,6 +76,7 @@
     "verify:storage-foundation": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-foundation.ts",
     "verify:storage-retention": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-retention.ts",
     "verify:legacy-storage-migration": "OWL_RUNTIME_MODE=test tsx scripts/verify-legacy-storage-migration.ts",
+    "verify:storage-metadata-sqlite": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-metadata-sqlite.ts",
     "verify:runtime-integration-freeze": "OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-integration-freeze.ts",
     "verify:schedule-pause-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-schedule-pause-resume.ts"
   },
