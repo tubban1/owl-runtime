@@ -422,12 +422,12 @@ export function putObjectRow(
   insertObject(db, object);
 }
 
-export function storageMetadataInfo(root = owlLabDataRoot()) {
+export function storageMetadataInfo() {
   return {
     schemaVersion: STORAGE_METADATA_SCHEMA_VERSION,
     provider: "sqlite" as const,
     database: "state/owl.db" as const,
     absolutePathExposed: false as const,
-    root,
+    secretsStoredHere: false as const,
   };
 }
