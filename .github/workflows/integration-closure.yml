@@ -13,6 +13,7 @@ on:
       - feature/1.x-storage-retention-gc
       - feature/1.x-storage-legacy-migration
       - feature/1.x-runtime-integration-freeze
+      - feature/1.x-sqlite-metadata-store
   pull_request:
     branches:
       - feature/1.x-agent-request-events
@@ -36,7 +37,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.13.0
           cache: npm
 
       - name: Install
@@ -89,6 +90,9 @@ jobs:
 
       - name: Verify Runtime Integration Freeze
         run: npm run verify:runtime-integration-freeze
+
+      - name: Verify SQLite Metadata Store
+        run: npm run verify:storage-metadata-sqlite
 
       - name: Build Public Types
         run: npm run build:types
