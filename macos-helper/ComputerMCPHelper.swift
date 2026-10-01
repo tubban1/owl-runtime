@@ -378,10 +378,38 @@ func requestPermissions() {
 }
 
 
+func argumentValue(_ name: String, in args: [String]) -> String? {
+    for (index, value) in args.enumerated() {
+        if value == name, index + 1 < args.count {
+            return args[index + 1]
+        }
+        let prefix = name + "="
+        if value.hasPrefix(prefix) {
+            return String(value.dropFirst(prefix.count))
+        }
+    }
+    return nil
+}
+
 func defaultSocketPath() -> String {
+    let environment = ProcessInfo.processInfo.environment
     let home = FileManager.default.homeDirectoryForCurrentUser.path
-    return ProcessInfo.processInfo.environment["COMPUTER_MCP_HELPER_SOCKET"]
-        ?? home + "/.computer-mcp/helper.sock"
+
+    if let socket = environment["OWL_HELPER_SOCKET"], !socket.isEmpty {
+        return socket
+    }
+    if let socket = environment["COMPUTER_MCP_HELPER_SOCKET"], !socket.isEmpty {
+        return socket
+    }
+    if let stateRoot = environment["OWL_STATE_ROOT"], !stateRoot.isEmpty {
+        return URL(fileURLWithPath: stateRoot)
+            .appendingPathComponent("helper.sock").path
+    }
+
+    // Keep the historical fallback for standalone/legacy installs. OWL Runtime
+    // passes an explicit --socket path, so current Runtime instances do not
+    // depend on this fallback.
+    return home + "/.computer-mcp/helper.sock"
 }
 
 func ensureSocketDirectory(_ socketPath: String) throws {
@@ -683,7 +711,8 @@ func handle(_ request: [String: Any]) throws -> Any {
     }
 }
 
-let args = CommandLine.arguments.dropFirst()
+let args = Array(CommandLine.arguments.dropFirst())
+let configuredSocketPath = argumentValue("--socket", in: args) ?? defaultSocketPath()
 
 if args.contains("--request-permissions") {
     requestPermissions()
@@ -697,7 +726,7 @@ if args.contains("--status") {
 
 if args.contains("--serve") || args.isEmpty {
     do {
-        try serve(socketPath: defaultSocketPath())
+        try serve(socketPath: configuredSocketPath)
     } catch {
         fail(String(describing: error))
     }

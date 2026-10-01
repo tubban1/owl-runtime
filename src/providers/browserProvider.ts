@@ -164,6 +164,59 @@ function requireBrowserEnabled(): void {
   }
 }
 
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function existingManagedChrome(
+  userDataDir: string,
+): Promise<{ pid: number; port: number; headless: boolean } | null> {
+  if (process.platform === "win32") return null;
+
+  let lockTarget: string;
+  try {
+    lockTarget = await fs.readlink(path.join(userDataDir, "SingletonLock"));
+  } catch {
+    return null;
+  }
+
+  const pidMatch = lockTarget.match(/-(\d+)$/);
+  const pid = pidMatch?.[1] ? Number(pidMatch[1]) : NaN;
+  if (!Number.isInteger(pid) || pid <= 0 || !processAlive(pid)) return null;
+
+  let command = "";
+  try {
+    command = execFileSync("/bin/ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return null;
+  }
+
+  if (!command.includes(`--user-data-dir=${userDataDir}`)) return null;
+  const portMatch = command.match(/--remote-debugging-port=(\d+)/);
+  const port = portMatch?.[1] ? Number(portMatch[1]) : NaN;
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+
+  try {
+    const status = await probeCdpHttp(port);
+    if (status < 200 || status >= 300) return null;
+  } catch {
+    return null;
+  }
+
+  return {
+    pid,
+    port,
+    headless: command.includes("--headless"),
+  };
+}
+
 function sha256Text(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -210,6 +263,7 @@ class BrowserProvider implements ComputerProvider {
   private chromeProcess: ChildProcess | null = null;
   private cdpPort: number | null = null;
   private currentHeadless: boolean | null = null;
+  private recoveredAfterRuntimeRestart = false;
   private launchPromise: Promise<BrowserContext> | null = null;
 
   async status(): Promise<ProviderStatus> {
@@ -237,6 +291,7 @@ class BrowserProvider implements ComputerProvider {
               5,
             )
           : 3,
+        recoveredAfterRuntimeRestart: this.recoveredAfterRuntimeRestart,
       },
     };
   }
@@ -258,6 +313,44 @@ class BrowserProvider implements ComputerProvider {
         new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
       ]);
     }
+  }
+
+  private async reconnectExistingBrowser(
+    userDataDir: string,
+    headless: boolean,
+  ): Promise<BrowserContext | null> {
+    const existing = await existingManagedChrome(userDataDir);
+    if (!existing || existing.headless !== headless) return null;
+
+    const browser = await chromium.connectOverCDP(
+      `http://127.0.0.1:${existing.port}`,
+      { timeout: browserConnectTimeoutMs() },
+    );
+    const context = browser.contexts()[0];
+    if (!context) {
+      await browser.close().catch(() => undefined);
+      return null;
+    }
+
+    this.browser = browser;
+    this.context = context;
+    this.activePage = context.pages()[0] ?? (await context.newPage());
+    this.chromeProcess = null;
+    this.cdpPort = existing.port;
+    this.currentHeadless = existing.headless;
+    this.recoveredAfterRuntimeRestart = true;
+
+    browser.on("disconnected", () => {
+      this.browser = null;
+      this.context = null;
+      this.activePage = null;
+      this.chromeProcess = null;
+      this.cdpPort = null;
+      this.currentHeadless = null;
+      this.recoveredAfterRuntimeRestart = false;
+    });
+
+    return context;
   }
 
   private async launchBrowserAttempt(
@@ -318,6 +411,7 @@ class BrowserProvider implements ComputerProvider {
       this.chromeProcess = child;
       this.cdpPort = port;
       this.currentHeadless = headless;
+      this.recoveredAfterRuntimeRestart = false;
       this.activePage = context.pages()[0] ?? (await context.newPage());
 
       browser.on("disconnected", () => {
@@ -327,6 +421,7 @@ class BrowserProvider implements ComputerProvider {
         this.chromeProcess = null;
         this.cdpPort = null;
         this.currentHeadless = null;
+        this.recoveredAfterRuntimeRestart = false;
       });
 
       return context;
@@ -354,6 +449,13 @@ class BrowserProvider implements ComputerProvider {
     await fs.mkdir(userDataDir, { recursive: true });
 
     const headless = headlessOverride ?? envFlag("BROWSER_HEADLESS", false);
+
+    const recovered = await this.reconnectExistingBrowser(
+      userDataDir,
+      headless,
+    ).catch(() => null);
+    if (recovered) return recovered;
+
     const configuredAttempts = Number(process.env.BROWSER_STARTUP_ATTEMPTS);
     const startupAttempts = Number.isFinite(configuredAttempts)
       ? Math.min(Math.max(Math.trunc(configuredAttempts), 1), 5)
@@ -783,6 +885,7 @@ class BrowserProvider implements ComputerProvider {
     this.chromeProcess = null;
     this.cdpPort = null;
     this.currentHeadless = null;
+    this.recoveredAfterRuntimeRestart = false;
 
     if (browser?.isConnected()) {
       await browser.close().catch(() => undefined);

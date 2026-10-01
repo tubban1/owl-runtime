@@ -1,8 +1,44 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
+
+async function findFreePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("Could not allocate a browser test port."));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
+  });
+}
+
+async function waitForCdp(port: number, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (response.ok) return;
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`CDP did not become ready: ${lastError}`);
+}
 
 async function browserExecutable(): Promise<string> {
   const home = process.env.HOME;
@@ -106,6 +142,55 @@ try {
   assert.equal(reopened.url, url);
   await browserProvider.close();
 
+  // Simulate a Runtime restart: Chrome survives with the persistent OWL profile
+  // and CDP enabled, but the new Runtime has no in-memory Browser object.
+  const restartPort = await findFreePort();
+  const survivor = spawn(
+    executable,
+    [
+      "--headless=new",
+      `--remote-debugging-port=${restartPort}`,
+      "--remote-debugging-address=127.0.0.1",
+      `--user-data-dir=${profile}`,
+      "--remote-allow-origins=*",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "about:blank",
+    ],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+  try {
+    await waitForCdp(restartPort);
+    const recovered = await browserProvider.open(
+      url,
+      "domcontentloaded",
+      true,
+    );
+    assert.equal(recovered.url, url);
+    const recoveredStatus = await browserProvider.status();
+    assert.equal(recoveredStatus.details?.connected, true);
+    assert.equal(
+      recoveredStatus.details?.recoveredAfterRuntimeRestart,
+      true,
+    );
+    assert.equal(recoveredStatus.details?.cdpPort, restartPort);
+    await browserProvider.close();
+
+    await new Promise<void>((resolve) => {
+      if (survivor.exitCode != null) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(resolve, 3_000);
+      survivor.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  } finally {
+    if (survivor.exitCode == null) survivor.kill("SIGKILL");
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -114,6 +199,7 @@ try {
         boundedRetryRecovered: true,
         concurrentColdCallSharedLaunch: true,
         relaunchAfterCleanup: true,
+        recoveredSurvivingBrowserAfterRuntimeRestart: true,
       },
       null,
       2,
