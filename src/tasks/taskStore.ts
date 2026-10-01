@@ -73,6 +73,12 @@ export interface PersistentTaskEvent {
   stepId?: string;
 }
 
+export type PersistentTaskOrchestration = {
+  orchestrationId: string;
+  label?: string;
+  parentTaskId?: string;
+};
+
 export type PersistentTaskProvenance =
   | {
       kind: "skill_candidate_test";
@@ -98,6 +104,7 @@ export interface PersistentTask {
   id: string;
   label: string;
   ownerSessionId?: string;
+  orchestration?: PersistentTaskOrchestration;
   provenance?: PersistentTaskProvenance;
   executionRevision?: ExecutionRevision;
   executionActivation?: ExecutionActivation;

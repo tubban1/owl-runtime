@@ -32,6 +32,13 @@ export type PublicExecutionActivationV1 = {
   activatedAt: string;
 };
 
+export type PublicTaskOrchestrationV1 = {
+  schemaVersion: 1;
+  orchestrationId: string;
+  label: string | null;
+  parentTaskId: string | null;
+};
+
 export type PublicTaskProvenanceV1 =
   | {
       kind: "skill_candidate_test";
@@ -133,6 +140,7 @@ export type PublicTaskDetailV1 = {
   status: PublicTaskStatusV1;
   progress: PublicTaskProgressV1;
   ownerSessionId: string | null;
+  orchestration: PublicTaskOrchestrationV1 | null;
   provenance: PublicTaskProvenanceV1 | null;
   executionRevision: PublicExecutionRevisionRefV1 | null;
   executionActivation: PublicExecutionActivationV1 | null;
@@ -163,6 +171,7 @@ export type PublicTaskSummaryV1 = {
   status: PublicTaskStatusV1;
   progress: PublicTaskProgressV1;
   ownerSessionId: string | null;
+  orchestration: PublicTaskOrchestrationV1 | null;
   createdAt: string;
   updatedAt: string;
   runCount: number;

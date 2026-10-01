@@ -60,6 +60,7 @@ const checks = [
   ["verifier-abi", "npm", ["run", "verify:verifier-abi"]],
   ["action-observation", "npm", ["run", "verify:action-observation"]],
   ["verification-coverage", "npm", ["run", "verify:verification-coverage"]],
+  ["task-orchestration", "npm", ["run", "verify:task-orchestration"]],
   ["browser-postconditions", "npm", ["run", "verify:browser-postconditions"]],
   ["browser-cancellation", "npm", ["run", "verify:browser-cancellation"]],
   ["desktop-postconditions", "npm", ["run", "verify:desktop-postconditions"]],

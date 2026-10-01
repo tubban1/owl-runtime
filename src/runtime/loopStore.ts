@@ -10,6 +10,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import type { PrimitiveTaskStep } from "../tasks/taskRuntime.js";
+import type { PersistentTaskOrchestration } from "../tasks/taskStore.js";
 
 export type LoopAdvanceWhen = {
   path?: string;
@@ -40,6 +41,7 @@ export type PersistentLoop = {
   createdAt: string;
   updatedAt: string;
   enabled: boolean;
+  orchestration?: PersistentTaskOrchestration;
   phases: LoopPhase[];
   currentPhaseIndex: number;
   cycleCount: number;

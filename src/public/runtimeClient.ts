@@ -240,12 +240,19 @@ export type PrimitiveTaskStepRequest = {
   verify?: PublicVerificationSpec;
 };
 
+export type TaskOrchestrationRequest = {
+  orchestrationId: string;
+  label?: string;
+  parentTaskId?: string;
+};
+
 export type CreateTaskRequest = {
   label: string;
   steps: TaskStepRequest[];
   maxConcurrency?: number;
   failFast?: boolean;
   executionTarget?: PublicExecutionTarget;
+  orchestration?: TaskOrchestrationRequest;
 };
 
 export type ActivateExecutionRevisionRequest = {
@@ -301,6 +308,7 @@ export type CreateScheduleRequest = {
   maxRuns?: number;
   endAt?: string;
   executionTarget?: PublicExecutionTarget;
+  orchestration?: TaskOrchestrationRequest;
 };
 
 export type ResumeScheduleRequest = {
@@ -692,6 +700,7 @@ export class InProcessRuntimeClient implements RuntimeClient, UserSkillRuntimeCl
             executionTarget: assertExecutionTargetAvailable(
               request.executionTarget,
             ),
+            orchestration: request.orchestration,
           },
         ),
     );

@@ -13,6 +13,7 @@ import { getProviderStatuses } from "../providers/registry.js";
 import {
   createPersistentPrimitiveTask,
   getPersistentTaskStatus,
+  normalizeTaskOrchestration,
   type PrimitiveTaskStep,
 } from "../tasks/taskRuntime.js";
 import {
@@ -628,6 +629,35 @@ function optionalBoolean(args: JsonObject, key: string, fallback: boolean): bool
   return typeof value === "boolean" ? value : fallback;
 }
 
+function parseTaskOrchestration(raw: unknown) {
+  if (raw === undefined || raw === null) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      "Task orchestration must be an object with orchestration_id.",
+    );
+  }
+  const object = raw as JsonObject;
+  const rawId = object.orchestration_id ?? object.orchestrationId;
+  const rawLabel = object.label;
+  const rawParentTaskId = object.parent_task_id ?? object.parentTaskId;
+  if (typeof rawId !== "string") {
+    throw new Error("Task orchestration requires orchestration_id.");
+  }
+  if (rawLabel !== undefined && typeof rawLabel !== "string") {
+    throw new Error("Task orchestration label must be a string.");
+  }
+  if (rawParentTaskId !== undefined && typeof rawParentTaskId !== "string") {
+    throw new Error("Task orchestration parent_task_id must be a string.");
+  }
+  return normalizeTaskOrchestration({
+    orchestrationId: rawId,
+    ...(typeof rawLabel === "string" ? { label: rawLabel } : {}),
+    ...(typeof rawParentTaskId === "string"
+      ? { parentTaskId: rawParentTaskId }
+      : {}),
+  });
+}
+
 function requiredNumber(args: JsonObject, key: string): number {
   const value = args[key];
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -1229,6 +1259,8 @@ const skills: SkillDefinition[] = [
         "Array of Primitive steps: {id, primitive, op, args?, depends_on?, verify?}. verify declares Observation postconditions; $ref dependencies are supported.",
       max_concurrency: "Maximum parallel Primitive steps; default 4, max 8.",
       fail_fast: "Stop after the first failed execution wave; default true.",
+      orchestration:
+        "Optional goal/workset metadata: {orchestration_id,label?,parent_task_id?}. Tasks with the same orchestration_id may be grouped by product UIs without changing Runtime execution authority.",
     },
     dryRunPlan: (args) => ({
       durable: true,
@@ -1238,6 +1270,7 @@ const skills: SkillDefinition[] = [
       steps: Array.isArray(args.steps) ? args.steps : [],
       memory: ["working", "staging", "episodic"],
       semanticPromotion: "manual",
+      orchestration: args.orchestration ?? null,
     }),
     run: async (args) => {
       const label = requiredText(args, "label");
@@ -1249,6 +1282,7 @@ const skills: SkillDefinition[] = [
             ? Math.min(Math.max(Math.trunc(args.max_concurrency), 1), 8)
             : 4,
         failFast: optionalBoolean(args, "fail_fast", true),
+        orchestration: parseTaskOrchestration(args.orchestration),
       });
     },
   },
@@ -1281,6 +1315,8 @@ const skills: SkillDefinition[] = [
       max_runs: "Optional maximum completed occurrences.",
       end_at: "Optional ISO date/time after which no new occurrence runs.",
       schedule_id: "Required for status/cancel/delete.",
+      orchestration:
+        "Optional goal/workset metadata inherited by every Durable Task created by this schedule: {orchestration_id,label?,parent_task_id?}.",
     },
     dryRunPlan: (args) => ({
       durable: true,
@@ -1291,6 +1327,7 @@ const skills: SkillDefinition[] = [
       wakeModel: "persistent_local_scheduler",
       survivesMcpRequest: true,
       survivesRuntimeRestart: true,
+      orchestration: args.orchestration ?? null,
     }),
     run: async (args) => {
       const operation =
@@ -1343,6 +1380,7 @@ const skills: SkillDefinition[] = [
         maxRuns:
           typeof args.max_runs === "number" ? args.max_runs : undefined,
         endAt: typeof args.end_at === "string" ? args.end_at : undefined,
+        orchestration: parseTaskOrchestration(args.orchestration),
       });
     },
   },
@@ -1372,6 +1410,8 @@ const skills: SkillDefinition[] = [
       max_cycles: "Optional maximum complete loop cycles.",
       end_at: "Optional ISO date/time after which the loop stops.",
       loop_id: "Required for status/cancel/delete.",
+      orchestration:
+        "Optional goal/workset metadata inherited by every Primitive-backed Durable Task created by this loop: {orchestration_id,label?,parent_task_id?}.",
     },
     dryRunPlan: (args) => ({
       durable: true,
@@ -1390,6 +1430,7 @@ const skills: SkillDefinition[] = [
       changeDetection: true,
       survivesMcpRequest: true,
       survivesRuntimeRestart: true,
+      orchestration: args.orchestration ?? null,
     }),
     run: async (args) => {
       const operation =
@@ -1439,6 +1480,7 @@ const skills: SkillDefinition[] = [
           typeof args.time_budget_ms === "number"
             ? args.time_budget_ms
             : undefined,
+        orchestration: parseTaskOrchestration(args.orchestration),
       });
     },
   },

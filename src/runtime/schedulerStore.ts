@@ -10,6 +10,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import type { PrimitiveTaskStep } from "../tasks/taskRuntime.js";
+import type { PersistentTaskOrchestration } from "../tasks/taskStore.js";
 import type { ExecutionTarget } from "./executionTarget.js";
 
 export type ScheduleTrigger =
@@ -39,6 +40,7 @@ export type PersistentSchedule = {
     maxWaves: number;
     timeBudgetMs: number;
     executionTarget?: ExecutionTarget;
+    orchestration?: PersistentTaskOrchestration;
   };
   stopWhen?: ScheduleStopWhen;
   maxRuns?: number;

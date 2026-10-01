@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   createPersistentPrimitiveTask,
   getPersistentTaskStatus,
+  normalizeTaskOrchestration,
   runPersistentTask,
   validatePrimitiveTaskSteps,
   type PrimitiveTaskStep,
@@ -22,6 +23,7 @@ import {
   type LoopPhase,
   type PersistentLoop,
 } from "./loopStore.js";
+import type { PersistentTaskOrchestration } from "../tasks/taskStore.js";
 import { runtimeLifecycle } from "./runtimeLifecycle.js";
 import { injectTestFault } from "./faultInjection.js";
 
@@ -35,6 +37,7 @@ type CreateLoopInput = {
   failFast?: boolean;
   maxWaves?: number;
   timeBudgetMs?: number;
+  orchestration?: PersistentTaskOrchestration;
 };
 
 let loopTimer: NodeJS.Timeout | undefined;
@@ -206,6 +209,13 @@ function summarize(loop: PersistentLoop) {
     id: loop.id,
     label: loop.label,
     enabled: loop.enabled,
+    orchestration: loop.orchestration
+      ? {
+          orchestrationId: loop.orchestration.orchestrationId,
+          label: loop.orchestration.label ?? null,
+          parentTaskId: loop.orchestration.parentTaskId ?? null,
+        }
+      : null,
     phase: currentPhase(loop).id,
     currentPhaseIndex: loop.currentPhaseIndex,
     phaseCount: loop.phases.length,
@@ -301,6 +311,7 @@ export async function createPersistentLoop(input: CreateLoopInput) {
     createdAt,
     updatedAt: createdAt,
     enabled: true,
+    orchestration: normalizeTaskOrchestration(input.orchestration),
     phases: input.phases,
     currentPhaseIndex: 0,
     cycleCount: 0,
@@ -385,6 +396,7 @@ async function ensureLoopTask(
       maxConcurrency: loop.taskRuntime.maxConcurrency,
       failFast: loop.taskRuntime.failFast,
       taskId,
+      orchestration: loop.orchestration,
     },
   );
 }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   createPersistentPrimitiveTask,
   getPersistentTaskStatus,
+  normalizeTaskOrchestration,
   runPersistentTask,
   validatePrimitiveTaskSteps,
   type PrimitiveTaskStep,
@@ -17,6 +18,7 @@ import {
   type ScheduleStopWhen,
   type ScheduleTrigger,
 } from "./schedulerStore.js";
+import type { PersistentTaskOrchestration } from "../tasks/taskStore.js";
 import { runtimeLifecycle } from "./runtimeLifecycle.js";
 import { injectTestFault } from "./faultInjection.js";
 import { currentExecutionContext } from "./executionContext.js";
@@ -39,6 +41,7 @@ type CreateScheduleInput = {
   maxRuns?: number;
   endAt?: string;
   executionTarget?: ExecutionTarget;
+  orchestration?: PersistentTaskOrchestration;
 };
 
 const activeSchedules = new Set<string>();
@@ -195,6 +198,7 @@ function summarize(schedule: PersistentSchedule) {
       executionTarget: normalizeExecutionTarget(
         schedule.taskTemplate.executionTarget,
       ),
+      orchestration: schedule.taskTemplate.orchestration,
     },
     storage: getScheduleStorageInfo(),
   };
@@ -275,6 +279,7 @@ export async function createPrimitiveSchedule(
       maxWaves,
       timeBudgetMs,
       executionTarget,
+      orchestration: normalizeTaskOrchestration(input.orchestration),
     },
     ...(input.stopWhen ? { stopWhen: input.stopWhen } : {}),
     ...(maxRuns ? { maxRuns } : {}),
@@ -385,6 +390,7 @@ async function ensureScheduledTask(
       executionTarget: normalizeExecutionTarget(
         schedule.taskTemplate.executionTarget,
       ),
+      orchestration: schedule.taskTemplate.orchestration,
     },
   );
 }

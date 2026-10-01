@@ -36,6 +36,7 @@ import {
   readPersistentTask,
   writePersistentTask,
   type PersistentTask,
+  type PersistentTaskOrchestration,
   type PersistentTaskProvenance,
   type PersistentTaskStep,
 } from "./taskStore.js";
@@ -221,6 +222,67 @@ function publicTaskEvent(
   return event;
 }
 
+function normalizeOrchestrationText(
+  value: string | undefined,
+  field: string,
+  maxLength: number,
+): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`TASK_ORCHESTRATION_INVALID: ${field} must not be empty.`);
+  }
+  if (normalized.length > maxLength) {
+    throw new Error(
+      `TASK_ORCHESTRATION_INVALID: ${field} exceeds ${maxLength} characters.`,
+    );
+  }
+  if (/[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error(
+      `TASK_ORCHESTRATION_INVALID: ${field} contains control characters.`,
+    );
+  }
+  return normalized;
+}
+
+export function normalizeTaskOrchestration(
+  input?: PersistentTaskOrchestration | null,
+): PersistentTaskOrchestration | undefined {
+  if (!input) return undefined;
+  const orchestrationId = normalizeOrchestrationText(
+    input.orchestrationId,
+    "orchestrationId",
+    160,
+  );
+  if (!orchestrationId) {
+    throw new Error(
+      "TASK_ORCHESTRATION_INVALID: orchestrationId is required.",
+    );
+  }
+  const label = normalizeOrchestrationText(input.label, "label", 240);
+  const parentTaskId = normalizeOrchestrationText(
+    input.parentTaskId,
+    "parentTaskId",
+    200,
+  );
+  return {
+    orchestrationId,
+    ...(label ? { label } : {}),
+    ...(parentTaskId ? { parentTaskId } : {}),
+  };
+}
+
+function publicTaskOrchestration(task: PersistentTask) {
+  return task.orchestration
+    ? {
+        schemaVersion: 1 as const,
+        orchestrationId: task.orchestration.orchestrationId,
+        label: task.orchestration.label ?? null,
+        parentTaskId: task.orchestration.parentTaskId ?? null,
+      }
+    : null;
+}
+
 function taskVerificationCounts(task: PersistentTask) {
   const requiredSteps = task.steps.filter((step) => step.requiresVerification);
   const verified = requiredSteps.filter(
@@ -313,6 +375,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
     status: task.status,
     progress: taskProgress(task),
     ownerSessionId: task.ownerSessionId ?? null,
+    orchestration: publicTaskOrchestration(task),
     provenance: task.provenance ?? null,
     executionRevision: task.executionRevision
       ? {
@@ -594,6 +657,7 @@ export async function createPersistentTask(
     failFast?: boolean;
     executionTarget?: ExecutionTarget;
     expectedRevisionDigest?: string;
+    orchestration?: PersistentTaskOrchestration;
     provenance?: PersistentTaskProvenance;
   },
 ) {
@@ -615,6 +679,7 @@ export async function createPersistentTask(
     8,
   );
   const normalizedFailFast = options?.failFast ?? true;
+  const orchestration = normalizeTaskOrchestration(options?.orchestration);
   const executionRevision = createExecutionRevision({
     label,
     steps,
@@ -635,6 +700,7 @@ export async function createPersistentTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    orchestration,
     provenance: options?.provenance,
     executionRevision,
     executionTarget,
@@ -737,6 +803,7 @@ export async function createPersistentPrimitiveTask(
     failFast?: boolean;
     taskId?: string;
     executionTarget?: ExecutionTarget;
+    orchestration?: PersistentTaskOrchestration;
     provenance?: PersistentTaskProvenance;
   },
 ) {
@@ -749,6 +816,7 @@ export async function createPersistentPrimitiveTask(
     8,
   );
   const normalizedFailFast = options?.failFast ?? true;
+  const orchestration = normalizeTaskOrchestration(options?.orchestration);
   const revisionSteps = steps.map((step) => {
     const routed = routePrimitive(step.primitive, step.op, step.args ?? {});
     return {
@@ -776,6 +844,7 @@ export async function createPersistentPrimitiveTask(
     id,
     label,
     ownerSessionId: currentExecutionContext().sessionId,
+    orchestration,
     provenance: options?.provenance,
     executionRevision,
     executionTarget,
@@ -843,6 +912,7 @@ export async function listPersistentTasks() {
     status: task.status,
     progress: taskProgress(task),
     ownerSessionId: task.ownerSessionId ?? null,
+    orchestration: publicTaskOrchestration(task),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     runCount: task.runCount,

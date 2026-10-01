@@ -60,6 +60,7 @@
     "verify:health-model": "OWL_RUNTIME_MODE=test tsx scripts/verify-health-model.ts",
     "verify:action-observation": "OWL_RUNTIME_MODE=test tsx scripts/verify-action-observation.ts",
     "verify:verification-coverage": "OWL_RUNTIME_MODE=test tsx scripts/verify-verification-coverage.ts",
+    "verify:task-orchestration": "OWL_RUNTIME_MODE=test tsx scripts/verify-task-orchestration.ts",
     "verify:browser-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-postconditions.ts",
     "verify:public-runtime-client": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-runtime-client.ts",
     "build:types": "tsc -p tsconfig.public.json",
