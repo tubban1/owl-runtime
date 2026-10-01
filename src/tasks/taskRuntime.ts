@@ -221,6 +221,28 @@ function publicTaskEvent(
   return event;
 }
 
+function taskVerificationCounts(task: PersistentTask) {
+  const requiredSteps = task.steps.filter((step) => step.requiresVerification);
+  const verified = requiredSteps.filter(
+    (step) => step.verification?.status === "verified",
+  ).length;
+  const failed = requiredSteps.filter(
+    (step) => step.verification?.status === "failed",
+  ).length;
+  const uncertain = requiredSteps.filter(
+    (step) => step.verification?.status === "uncertain",
+  ).length;
+  const receipts = verified + failed + uncertain;
+  return {
+    required: requiredSteps.length,
+    receipts,
+    verified,
+    failed,
+    uncertain,
+    missing: Math.max(0, requiredSteps.length - receipts),
+  };
+}
+
 function taskProgress(task: PersistentTask) {
   const counts = {
     total: task.steps.length,
@@ -303,6 +325,7 @@ function summarizeTask(task: PersistentTask, includeResults = false) {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     runCount: task.runCount,
+    verificationCounts: taskVerificationCounts(task),
     lastRunAt: task.lastRunAt ?? null,
     completedAt: task.completedAt ?? null,
     pausedAt: task.pausedAt ?? null,
@@ -823,6 +846,7 @@ export async function listPersistentTasks() {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     runCount: task.runCount,
+    verificationCounts: taskVerificationCounts(task),
     counts: {
       total: task.steps.length,
       pending: task.steps.filter((step) => step.state === "pending").length,
@@ -835,12 +859,11 @@ export async function listPersistentTasks() {
       needsReview: task.steps.filter((step) => step.state === "needs_review").length,
     },
     staging: {
-      root: task.stagingRoot ?? null,
-      manifestPath: task.stagingManifestPath ?? null,
       artifactCount: task.stagedArtifacts?.length ?? 0,
-      bytes:
-        task.stagedArtifacts?.reduce((sum, artifact) => sum + artifact.bytes, 0) ??
-        0,
+      committedArtifactCount: publicStagedArtifactRefs(task).length,
+      legacyUncommittedArtifactCount:
+        (task.stagedArtifacts?.length ?? 0) - publicStagedArtifactRefs(task).length,
+      internalPathsExposed: false as const,
     },
   }));
 }

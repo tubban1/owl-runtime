@@ -69,6 +69,15 @@ export type PublicVerificationReceiptV1 = {
   checkedAt: string;
 };
 
+export type PublicVerificationCountsV1 = {
+  required: number;
+  receipts: number;
+  verified: number;
+  failed: number;
+  uncertain: number;
+  missing: number;
+};
+
 export type PublicTaskStepV1 = {
   id: string;
   action: string;
@@ -130,6 +139,7 @@ export type PublicTaskDetailV1 = {
   createdAt: string;
   updatedAt: string;
   runCount: number;
+  verificationCounts: PublicVerificationCountsV1;
   storage: {
     encryptedAtRest: boolean;
     algorithm: string;
@@ -156,6 +166,7 @@ export type PublicTaskSummaryV1 = {
   createdAt: string;
   updatedAt: string;
   runCount: number;
+  verificationCounts: PublicVerificationCountsV1;
   counts: {
     total: number;
     pending: number;
@@ -164,6 +175,12 @@ export type PublicTaskSummaryV1 = {
     succeeded: number;
     failed: number;
     needsReview: number;
+  };
+  staging: {
+    artifactCount: number;
+    committedArtifactCount: number;
+    legacyUncommittedArtifactCount: number;
+    internalPathsExposed: false;
   };
   [key: string]: unknown;
 };

@@ -7,6 +7,7 @@ import {
   createPersistentPrimitiveTask,
   deletePersistentTask,
   getPersistentTaskStatus,
+  listPersistentTasks,
   runPersistentTask,
 } from "../src/tasks/taskRuntime.js";
 import { ensureTaskStage } from "../src/tasks/taskStaging.js";
@@ -78,6 +79,25 @@ try {
   assert.equal(status.staging.internalPathsExposed, false);
   assert.equal("root" in status.staging, false);
   assert.equal("manifestPath" in status.staging, false);
+  assert.deepEqual(status.verificationCounts, {
+    required: 1,
+    receipts: 1,
+    verified: 1,
+    failed: 0,
+    uncertain: 0,
+    missing: 0,
+  });
+
+  const listed = await listPersistentTasks();
+  const listedTask = listed.find((entry) => entry.id === taskId);
+  assert.ok(listedTask);
+  assert.equal(listedTask.staging.internalPathsExposed, false);
+  assert.equal("root" in listedTask.staging, false);
+  assert.equal("manifestPath" in listedTask.staging, false);
+  assert.deepEqual(listedTask.verificationCounts, status.verificationCounts);
+  const serializedListTask = JSON.stringify(listedTask);
+  assert.equal(serializedListTask.includes("manifestPath"), false);
+  assert.equal(serializedListTask.includes(internalStage.root), false);
 
   const manifestPath = internalStage.manifestPath;
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
@@ -133,8 +153,10 @@ try {
           artifacts: status.memoryLayers.staging.artifactCount,
           downstreamStagedReference: true,
           publicArtifactBoundary: true,
+          publicListBoundary: true,
           internalPathsExposed: false,
         },
+        verificationCounts: status.verificationCounts,
         episodicMemory: {
           events: status.memoryLayers.episodic.eventCount,
           runs: status.memoryLayers.episodic.runCount,

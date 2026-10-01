@@ -238,3 +238,45 @@ Release-gated evidence includes:
 - Desktop generic input → `uncertain`;
 - Desktop observation failure remains `uncertain`;
 - real desktop permissions are not required by the verifier-only conformance test.
+
+
+## Public verification aggregates
+
+Task list/detail projections expose a bounded verification aggregate:
+
+```text
+verificationCounts:
+  required
+  receipts
+  verified
+  failed
+  uncertain
+  missing
+```
+
+The aggregate counts only task steps whose contract or explicit step specification requires verification.
+
+`receipts = verified + failed + uncertain`.
+
+`missing` counts required steps that do not yet have a receipt. It is therefore meaningful for queued/running work and for detecting an incomplete verifier path.
+
+The aggregate is intentionally evidence-free. Observation payloads, verifier evidence and internal storage paths remain behind the Runtime authority boundary.
+
+## Task list storage firewall
+
+`tasks.list` is a public projection and MUST NOT expose Runtime-internal staging paths.
+
+The summary may expose:
+
+- artifact counts;
+- committed vs legacy-uncommitted artifact counts;
+- `internalPathsExposed: false`.
+
+It MUST NOT expose:
+
+- staging root;
+- manifest path;
+- staged source path;
+- CAS internal filesystem paths.
+
+Runtime-internal verification or maintenance code that needs staging paths must call the internal staging service directly rather than recovering them from a public Task DTO.

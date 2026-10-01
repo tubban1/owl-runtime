@@ -27,6 +27,7 @@ const {
   deletePersistentTask,
   getPersistentTaskStatus,
 } = await import("../src/tasks/taskRuntime.js");
+const { ensureTaskStage } = await import("../src/tasks/taskStaging.js");
 
 let scheduleId = "";
 let taskId = "";
@@ -87,7 +88,10 @@ try {
   const task = await getPersistentTaskStatus(taskId, true);
   assert.equal(task.status, "completed");
   assert.equal(task.steps.find((step) => step.id === "read")?.result, content);
-  stagingRoot = String(task.staging.root ?? "");
+  assert.equal(task.staging.internalPathsExposed, false);
+  assert.equal("root" in task.staging, false);
+  assert.equal("manifestPath" in task.staging, false);
+  stagingRoot = (await ensureTaskStage(taskId)).root;
 
   console.log(
     JSON.stringify(

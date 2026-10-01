@@ -76,6 +76,7 @@ export {
   type PublicTaskProvenanceV1,
   type PublicObservationV1,
   type PublicVerificationReceiptV1,
+  type PublicVerificationCountsV1,
   type PublicTaskStepV1,
   type PublicTaskProgressV1,
   type PublicTaskDetailV1,

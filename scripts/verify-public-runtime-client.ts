@@ -68,6 +68,16 @@ assert.equal(run.status, "completed");
 
 const fetched = (await client.getTask(task.id, true)) as any;
 assert.equal(fetched.status, "completed");
+assert.ok(fetched.verificationCounts);
+
+const listed = (await client.listTasks()) as any[];
+const listedTask = listed.find((entry) => entry.id === task.id);
+assert.ok(listedTask);
+assert.equal(listedTask.staging?.internalPathsExposed, false);
+assert.equal("root" in (listedTask.staging ?? {}), false);
+assert.equal("manifestPath" in (listedTask.staging ?? {}), false);
+assert.equal(JSON.stringify(listedTask).includes("manifestPath"), false);
+assert.ok(listedTask.verificationCounts);
 
 const health = (await client.health({ op: "task", task_id: task.id })) as any;
 assert.equal(health.result?.source, "task");
@@ -81,6 +91,8 @@ console.log(JSON.stringify({
   runtimeVersion: info.runtimeVersion,
   primitiveCall: true,
   persistentTask: true,
+  taskListStorageFirewall: true,
+  verificationCounts: true,
   health: true,
   processControl: true,
 }, null, 2));
