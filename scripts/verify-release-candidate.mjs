@@ -64,6 +64,7 @@ const checks = [
   ["desktop-postconditions", "npm", ["run", "verify:desktop-postconditions"]],
   ["process-state", "npm", ["run", "verify:process-state"]],
   ["process-control", "npm", ["run", "verify:process-control"]],
+  ["shell-environment", "npm", ["run", "verify:shell-environment"]],
   ["request-cancellation", "npm", ["run", "verify:request-cancellation"]],
   ["approval-policy", "npm", ["run", "verify:approval-policy"]],
   ["health-model", "npm", ["run", "verify:health-model"]],

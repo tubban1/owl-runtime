@@ -68,11 +68,18 @@ function helperMode(): "auto" | "required" | "disabled" {
   return "auto";
 }
 
+function helperExecutablePath(): string {
+  return path.join(
+    helperAppPath(),
+    "Contents",
+    "MacOS",
+    "ComputerMCPHelper",
+  );
+}
+
 async function helperInstalled(): Promise<boolean> {
   try {
-    await fs.access(
-      path.join(helperAppPath(), "Contents", "MacOS", "ComputerMCPHelper"),
-    );
+    await fs.access(helperExecutablePath());
     return true;
   } catch {
     return false;
@@ -142,24 +149,41 @@ async function launchHelper(): Promise<void> {
     mode: 0o700,
   });
 
-  const result = await run("/usr/bin/open", [
-    "-gj",
-    helperAppPath(),
-    "--args",
-    "--serve",
-  ]);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      result.stderr.trim() || "Could not launch OWL LAB Helper.",
-    );
-  }
+  const socketPath = helperSocketPath();
+  const child = spawn(
+    helperExecutablePath(),
+    ["--serve", "--socket", socketPath],
+    {
+      detached: true,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        OWL_HELPER_SOCKET: socketPath,
+        COMPUTER_MCP_HELPER_SOCKET: socketPath,
+      },
+    },
+  );
+  child.unref();
+
+  let launchError: Error | null = null;
+  child.once("error", (error) => {
+    launchError = error;
+  });
 
   const startedAt = Date.now();
   while (Date.now() - startedAt < 5000) {
+    if (launchError) throw launchError;
     if (await socketExists()) return;
+    if (child.exitCode != null) {
+      throw new Error(
+        `OWL LAB Helper exited before creating its Unix socket (code ${child.exitCode}).`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("OWL LAB Helper did not create its Unix socket.");
+  throw new Error(
+    `OWL LAB Helper did not create its Unix socket at ${socketPath}.`,
+  );
 }
 
 async function sendHelperRequestOnce(

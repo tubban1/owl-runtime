@@ -265,7 +265,7 @@ export async function executeCommand(
     stderr: string;
     timedOut: boolean;
   }>((resolve, reject) => {
-    const child = spawn(shellBinary(), ["-lc", command], {
+    const child = spawn(shellBinary(), ["-c", command], {
       cwd: safeCwd,
       env: process.env,
       detached: process.platform !== "win32",
@@ -383,7 +383,7 @@ export async function startProcess(
 
   let child: ChildProcess;
   try {
-    child = spawn(shellBinary(), ["-lc", command], {
+    child = spawn(shellBinary(), ["-c", command], {
       cwd: safeCwd,
       env: process.env,
       detached: true,
