@@ -9,6 +9,7 @@ import {
   getPersistentTaskStatus,
   runPersistentTask,
 } from "../src/tasks/taskRuntime.js";
+import { ensureTaskStage } from "../src/tasks/taskStaging.js";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -56,7 +57,8 @@ try {
   );
 
   taskId = created.id;
-  stagingRoot = created.staging.root;
+  const internalStage = await ensureTaskStage(taskId);
+  stagingRoot = internalStage.root;
 
   assert.equal(created.steps[0].executionKind, "primitive");
   assert.equal(created.steps[0].primitive, "fs.write");
@@ -73,25 +75,48 @@ try {
   assert.equal(status.memoryLayers.staging.artifactCount, 1);
   assert.ok(status.memoryLayers.episodic.eventCount > 0);
 
-  const manifestPath = status.staging.manifestPath;
-  assert.equal(typeof manifestPath, "string");
+  assert.equal(status.staging.internalPathsExposed, false);
+  assert.equal("root" in status.staging, false);
+  assert.equal("manifestPath" in status.staging, false);
+
+  const manifestPath = internalStage.manifestPath;
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   assert.equal(manifest.taskId, taskId);
   assert.equal(manifest.artifacts.length, 1);
   assert.equal(manifest.artifacts[0].stepId, "write");
+  assert.equal(typeof manifest.artifacts[0].stagedPath, "string");
+  assert.ok(
+    manifest.artifacts[0].stagedPath.startsWith(
+      path.join(scratch, "staging"),
+    ),
+  );
+
+  const publicArtifact = status.staging.artifacts[0] as any;
+  assert.ok(publicArtifact);
+  assert.equal(publicArtifact.schemaVersion, 1);
+  assert.equal(typeof publicArtifact.artifactId, "string");
+  assert.equal(typeof publicArtifact.objectId, "string");
+  assert.match(publicArtifact.digest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(typeof publicArtifact.sizeBytes, "number");
+  assert.equal("stagedPath" in publicArtifact, false);
+  assert.equal("sourcePath" in publicArtifact, false);
 
   const writeStep = status.steps.find((step) => step.id === "write");
   const readStep = status.steps.find((step) => step.id === "read_staged");
   assert.ok(writeStep);
   assert.ok(readStep);
 
-  const stagedPath = (writeStep.result as any)?.staging?.artifacts?.[0]?.stagedPath;
-  assert.equal(typeof stagedPath, "string");
-  assert.ok(stagedPath.startsWith(path.join(scratch, "staging")));
+  const publicStepArtifact =
+    (writeStep.result as any)?.staging?.artifacts?.[0];
+  assert.ok(publicStepArtifact);
+  assert.equal(publicStepArtifact.artifactId, publicArtifact.artifactId);
+  assert.equal("stagedPath" in publicStepArtifact, false);
+  assert.equal("sourcePath" in publicStepArtifact, false);
+
   assert.equal(
     readStep.result,
     "AgentOS durable staging reference\n",
-    "Downstream Primitive must be able to consume the staged artifact.",
+    "Downstream Primitive must still resolve the internal staged artifact while public DTOs expose only ArtifactRef identity.",
   );
 
   console.log(
@@ -107,6 +132,8 @@ try {
           manifestArtifacts: manifest.artifacts.length,
           artifacts: status.memoryLayers.staging.artifactCount,
           downstreamStagedReference: true,
+          publicArtifactBoundary: true,
+          internalPathsExposed: false,
         },
         episodicMemory: {
           events: status.memoryLayers.episodic.eventCount,
