@@ -189,6 +189,42 @@ async function control(
   return await callRuntimeClient(controlClient, port, op, args);
 }
 
+async function accessRpc(
+  port: number,
+  method: "access.get" | "access.authorize",
+  params?: Record<string, unknown>,
+) {
+  const requestId = `upgrade-access:${method}:${Date.now()}:${process.pid}`;
+  const response = await fetch(
+    `http://127.0.0.1:${port}/runtime/v0.1/rpc`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-owl-session-id": "runtime:upgrade-verifier",
+        "x-owl-request-id": requestId,
+        ...(method === "access.authorize"
+          ? { "x-owl-idempotency-key": "verify-upgrade-access-v1" }
+          : {}),
+        authorization: `Bearer ${runtimeApiToken}`,
+      },
+      body: JSON.stringify({
+        id: requestId,
+        method,
+        ...(params ? { params } : {}),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  const payload = (await response.json()) as Record<string, any>;
+  if (!response.ok || payload?.ok !== true) {
+    throw new Error(
+      `Runtime ${method} failed: ${JSON.stringify(payload)}`,
+    );
+  }
+  return payload.result as Record<string, any>;
+}
+
 const currentPort = await freePort();
 const candidatePort = await freePort();
 let current: ReturnType<typeof startRuntime> | undefined;
@@ -233,6 +269,29 @@ try {
 
   assert.equal(candidateHealth.runtime?.stateRoot, currentHealth.runtime?.stateRoot);
   assert.equal(candidateHealth.runtime?.lifecycle?.mutationIdle, true);
+
+  const locked = await accessRpc(currentPort, "access.get");
+  assert.equal(locked.mode, "enforced");
+  assert.equal(locked.state, "LOCKED");
+
+  const leaseExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  const authorized = await accessRpc(currentPort, "access.authorize", {
+    deviceId: "verify-upgrade-runtime",
+    organizationId: "verify-upgrade",
+    principalId: "upgrade-coordinator",
+    canRun: true,
+    leaseExpiresAt,
+    evidence: {
+      source: "verify-upgrade-runtime",
+      purpose: "release-candidate-upgrade-coordination",
+    },
+  });
+  assert.equal(authorized.mode, "enforced");
+  assert.equal(authorized.state, "READY");
+  assert.equal(authorized.grant?.deviceId, "verify-upgrade-runtime");
+
+  const candidateAccess = await accessRpc(candidatePort, "access.get");
+  assert.equal(candidateAccess.state, "READY");
 
   const initial = await control(currentPort, "status");
   assert.equal(initial.lifecycle.state, "running");
@@ -335,6 +394,9 @@ try {
           backgroundControllersStarted: false,
           compatibilityHealth: true,
         },
+        productionAccessStartsLocked: true,
+        upgradeCoordinatorLease: true,
+        sharedCandidateAccessLease: true,
         publicRuntimeDrainControl: true,
         drainWait: true,
         candidateStateMigration: true,
