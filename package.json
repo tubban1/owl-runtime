@@ -25,6 +25,7 @@
     "verify:task-memory": "OWL_RUNTIME_MODE=test tsx scripts/verify-task-memory.ts",
     "verify:detached-task-progress": "OWL_RUNTIME_MODE=test tsx scripts/verify-detached-task-progress.ts",
     "verify:runtime-access-state": "OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-access-state.ts",
+    "verify:runtime-signed-lease": "OWL_RUNTIME_MODE=test tsx scripts/verify-runtime-signed-lease.ts",
     "verify:shell-environment": "OWL_RUNTIME_MODE=test tsx scripts/verify-shell-environment.ts",
     "verify:scheduler": "OWL_RUNTIME_MODE=test tsx scripts/verify-scheduler.ts",
     "verify:loop": "OWL_RUNTIME_MODE=test tsx scripts/verify-loop.ts",
