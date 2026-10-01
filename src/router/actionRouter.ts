@@ -56,7 +56,7 @@ import {
 import { currentExecutionContext } from "../runtime/executionContext.js";
 import { assertProviderAffinity } from "../runtime/executionTarget.js";
 import { runtimeLifecycle } from "../runtime/runtimeLifecycle.js";
-import { assertRuntimeMutationAllowed } from "../runtime/runtimeAccessState.js";
+import { assertRuntimeAccessAllowed } from "../runtime/runtimeAccessState.js";
 import {
   defaultVerificationForAction,
   observeRoutedActionOutcome,
@@ -797,9 +797,7 @@ export async function executeRoutedAction(
     definition.provider,
     executionContext.executionTarget,
   );
-  if (contract.sideEffects.length > 0) {
-    await assertRuntimeMutationAllowed();
-  }
+  await assertRuntimeAccessAllowed();
   const approval = await authorizeAction(action, parsed, contract);
   const lifecycleMutation =
     contract.sideEffects.length > 0

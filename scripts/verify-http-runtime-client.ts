@@ -12,6 +12,10 @@ await fs.mkdir(scratch, { recursive: true });
 
 process.env.OWL_RUNTIME_MODE = "test";
 process.env.OWL_RUNTIME_ACCESS_MODE = "enforced";
+process.env.OWL_RUNTIME_REQUIRE_SIGNED_LEASE = "false";
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_PEM;
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_B64;
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE;
 process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.ALLOW_WRITE = "true";
@@ -71,6 +75,19 @@ try {
           idempotencyKey: "access-locked-task",
         },
       ),
+    (error: any) =>
+      error?.name === "RuntimeRpcError" &&
+      error?.code === "RUNTIME_ACCESS_LOCKED",
+  );
+
+  await assert.rejects(
+    () => client.listTasks(),
+    (error: any) =>
+      error?.name === "RuntimeRpcError" &&
+      error?.code === "RUNTIME_ACCESS_LOCKED",
+  );
+  await assert.rejects(
+    () => client.getCapabilities("locked-read"),
     (error: any) =>
       error?.name === "RuntimeRpcError" &&
       error?.code === "RUNTIME_ACCESS_LOCKED",

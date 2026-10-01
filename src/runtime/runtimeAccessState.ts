@@ -289,13 +289,13 @@ export async function revokeRuntimeAccess(
   return effectiveState(next);
 }
 
-export async function assertRuntimeMutationAllowed(): Promise<RuntimeAccessState> {
+export async function assertRuntimeAccessAllowed(): Promise<RuntimeAccessState> {
   const state = await getRuntimeAccessState();
   if (state.mode === "compat" || state.state === "READY") return state;
 
   if (state.state === "REVOKED") {
     throw new Error(
-      `RUNTIME_ACCESS_REVOKED: Runtime mutations are disabled (${state.reasonCode ?? "DEVICE_REVOKED"}).`,
+      `RUNTIME_ACCESS_REVOKED: Runtime computer access is disabled (${state.reasonCode ?? "DEVICE_REVOKED"}).`,
     );
   }
   if (state.reasonCode === "LEASE_EXPIRED") {
@@ -304,6 +304,10 @@ export async function assertRuntimeMutationAllowed(): Promise<RuntimeAccessState
     );
   }
   throw new Error(
-    `RUNTIME_ACCESS_LOCKED: Runtime mutations are locked (${state.reasonCode ?? "AUTHORIZATION_REQUIRED"}).`,
+    `RUNTIME_ACCESS_LOCKED: Runtime computer access is locked (${state.reasonCode ?? "AUTHORIZATION_REQUIRED"}).`,
   );
+}
+
+export async function assertRuntimeMutationAllowed(): Promise<RuntimeAccessState> {
+  return await assertRuntimeAccessAllowed();
 }

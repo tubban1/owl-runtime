@@ -4,7 +4,7 @@ import { z } from "zod";
 import { runtimeSessionManager } from "../runtime/runtimeSessionManager.js";
 import { withExecutionContext } from "../runtime/executionContext.js";
 import { runtimeMode } from "../runtime/runtimePaths.js";
-import { assertRuntimeMutationAllowed } from "../runtime/runtimeAccessState.js";
+import { assertRuntimeAccessAllowed } from "../runtime/runtimeAccessState.js";
 import { withCancellationSignal } from "../runtime/cancellation.js";
 import { runtimeRequestCancellationRegistry } from "../runtime/requestCancellationRegistry.js";
 import {
@@ -87,9 +87,9 @@ function requiresConsequentialReplay(
   );
 }
 
-function requiresRuntimeAccess(method: string, params: unknown): boolean {
+function requiresRuntimeAccess(method: string): boolean {
   if (ACCESS_CONTROL_RPC_METHODS.has(method)) return false;
-  return requiresConsequentialReplay(method, params);
+  return method !== "info";
 }
 
 const rpcRequestSchema = z.object({
@@ -255,8 +255,8 @@ export function registerRuntimeHttpApi(
 
       try {
         const invoke = async () => {
-          if (requiresRuntimeAccess(parsed.method, parsed.params)) {
-            await assertRuntimeMutationAllowed();
+          if (requiresRuntimeAccess(parsed.method)) {
+            await assertRuntimeAccessAllowed();
           }
           return await withExecutionContext(
             {
