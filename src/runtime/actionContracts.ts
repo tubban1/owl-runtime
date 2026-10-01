@@ -154,6 +154,7 @@ export function getActionContract(action: string, args: unknown = {}): ActionCon
       ...STATE_CHANGE,
       riskLevel: "medium",
       sideEffects: ["git_mutation"],
+      requiresVerification: true,
       resources: repoResource(args, "exclusive"),
     };
   }

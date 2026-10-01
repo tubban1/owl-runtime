@@ -30,6 +30,23 @@ try {
           timeout_ms: 10_000,
           workspace_mode: "read",
         },
+        verify: {
+          id: "detached-shell-completed",
+          description:
+            "The detached verification command must finish and emit its expected completion marker.",
+          expectations: [
+            {
+              path: "state",
+              operator: "equals",
+              expected: "finished",
+            },
+            {
+              path: "data.stdout",
+              operator: "contains",
+              expected: "done",
+            },
+          ],
+        },
       },
     ],
   });

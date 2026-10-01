@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { injectTestFault } from "../runtime/faultInjection.js";
 import {
   assertAllowedExistingPath,
@@ -9,6 +9,10 @@ import {
 import { requireCapability } from "../security/capabilities.js";
 
 const DEFAULT_MAX_RESULTS = 200;
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
 async function atomicReplaceText(
   target: string,
@@ -133,15 +137,30 @@ export async function writeFile(
   await atomicReplaceText(safePath, content, {
     mustNotExist: !overwrite,
   });
-  return { path: safePath, bytes: Buffer.byteLength(content, "utf8") };
+  return {
+    path: safePath,
+    bytes: Buffer.byteLength(content, "utf8"),
+    contentSha256: sha256Text(content),
+  };
 }
 
 export async function appendFile(inputPath: string, content: string) {
   requireCapability("ALLOW_WRITE", true);
   const safePath = await assertAllowedTargetPath(inputPath);
   await fs.mkdir(path.dirname(safePath), { recursive: true });
+  let original = "";
+  try {
+    original = await fs.readFile(safePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const expected = original + content;
   await fs.appendFile(safePath, content, { encoding: "utf8" });
-  return { path: safePath, bytesAppended: Buffer.byteLength(content, "utf8") };
+  return {
+    path: safePath,
+    bytesAppended: Buffer.byteLength(content, "utf8"),
+    contentSha256: sha256Text(expected),
+  };
 }
 
 export async function editFile(
@@ -170,7 +189,11 @@ export async function editFile(
   }
 
   await atomicReplaceText(safePath, updated);
-  return { path: safePath, replacements };
+  return {
+    path: safePath,
+    replacements,
+    contentSha256: sha256Text(updated),
+  };
 }
 
 export async function movePath(sourcePath: string, destinationPath: string) {
@@ -313,7 +336,11 @@ export async function batchEditFiles(
     string,
     { original: string; updated: string }
   >();
-  const results: Array<{ path: string; replacements: number }> = [];
+  const results: Array<{
+    path: string;
+    replacements: number;
+    contentSha256?: string;
+  }> = [];
 
   for (const edit of edits) {
     if (!edit.oldText) throw new Error("old_text must not be empty.");
@@ -347,5 +374,14 @@ export async function batchEditFiles(
     }
   }
 
-  return results;
+  const digests = new Map(
+    [...files.entries()].map(([filePath, state]) => [
+      filePath,
+      sha256Text(state.updated),
+    ]),
+  );
+  return results.map((result) => ({
+    ...result,
+    contentSha256: digests.get(result.path),
+  }));
 }
