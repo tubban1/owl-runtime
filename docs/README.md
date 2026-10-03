@@ -8,6 +8,7 @@ This directory is organized by document purpose rather than release chronology.
 - [Runtime daemon and MCP adapter boundary](architecture/runtime-daemon-boundary.md)
 - [Architecture overview](architecture/overview.md)
 - [Layer model](architecture/layers.md)
+- [OWL OS architecture contract — 1.x](contracts/OWL_OS_ARCHITECTURE_1X.md)
 - [v1.0 roadmap](roadmap/v1.0.md)
 - [v1.0 scope lock](roadmap/1.0-scope-lock.md)
 - [v1.0 frozen baseline](roadmap/1.0-frozen-baseline.md)
