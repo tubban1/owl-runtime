@@ -15,6 +15,10 @@ process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.ALLOW_SHELL = "true";
 process.env.OWL_APPROVAL_MODE = "compat";
+process.env.OWL_RUNTIME_REQUIRE_SIGNED_LEASE = "false";
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_PEM;
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_B64;
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE;
 
 const parentPath = path.join(scratch, "parent.cjs");
 const childPath = path.join(scratch, "child.cjs");
@@ -80,6 +84,14 @@ const client = new HttpRuntimeClient({ baseUrl, sessionId });
 const otherClient = new HttpRuntimeClient({
   baseUrl,
   sessionId: "dogfood:cancellation:B",
+});
+
+await client.authorizeRuntimeAccess({
+  deviceId: "verify-request-cancellation",
+  organizationId: "owl-runtime-test",
+  principalId: "verify-request-cancellation",
+  canRun: true,
+  leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
 });
 
 async function waitUntilActive(timeoutMs = 3_000) {

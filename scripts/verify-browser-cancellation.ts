@@ -14,6 +14,7 @@ process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.BROWSER_PROFILE_DIR = path.join(scratch, "browser-profile");
 process.env.ALLOW_BROWSER = "true";
 process.env.ALLOWED_DIRECTORIES = root;
+process.env.BROWSER_STARTUP_BUDGET_MS = "90000";
 
 const { browserProvider } = await import("../src/providers/browserProvider.js");
 const {
@@ -30,6 +31,20 @@ if (!browserStatus.available) {
   }, null, 2));
   process.exit(0);
 }
+
+assert.equal(browserStatus.details?.startupBudgetMs, 90_000);
+const realBrowserExecutable =
+  typeof browserStatus.details?.executable === "string"
+    ? browserStatus.details.executable
+    : null;
+assert.ok(realBrowserExecutable, "Expected a real Chromium executable.");
+
+const fakeBrowserExecutable = path.join(scratch, "fake-browser.sh");
+await fs.writeFile(
+  fakeBrowserExecutable,
+  "#!/bin/sh\nexec /bin/sleep 30\n",
+  { mode: 0o755 },
+);
 
 const hangingSockets = new Set<import("node:net").Socket>();
 const hanging = http.createServer((_request, response) => {
@@ -65,6 +80,110 @@ if (!healthyAddress || typeof healthyAddress === "string") {
 const healthyUrl = `http://127.0.0.1:${healthyAddress.port}/`;
 
 try {
+  process.env.BROWSER_EXECUTABLE = fakeBrowserExecutable;
+  process.env.BROWSER_STARTUP_TIMEOUT_MS = "5000";
+  process.env.BROWSER_CONNECT_TIMEOUT_MS = "5000";
+  process.env.BROWSER_STARTUP_ATTEMPTS = "3";
+  process.env.BROWSER_STARTUP_BUDGET_MS = "10000";
+
+  const startupController = new AbortController();
+  const startupStartedAt = Date.now();
+  const startupTimer = setTimeout(() => {
+    startupController.abort("browser cold-start cancellation");
+  }, 150);
+
+  await assert.rejects(
+    () =>
+      withCancellationSignal(startupController.signal, async () =>
+        await browserProvider.open(
+          healthyUrl,
+          "domcontentloaded",
+          true,
+        ),
+      ),
+    (error: unknown) =>
+      error instanceof OperationCancelledError ||
+      (error instanceof Error && /OPERATION_CANCELLED/.test(error.message)),
+  );
+  clearTimeout(startupTimer);
+
+  const startupCancelledInMs = Date.now() - startupStartedAt;
+  assert.ok(
+    startupCancelledInMs < 3_000,
+    `Browser cold-start cancellation took too long: ${startupCancelledInMs}ms`,
+  );
+
+  const slowBrowserExecutable = path.join(scratch, "slow-browser.sh");
+  await fs.writeFile(
+    slowBrowserExecutable,
+    [
+      "#!/bin/sh",
+      "sleep 0.8",
+      `exec ${JSON.stringify(realBrowserExecutable)} "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+
+  process.env.BROWSER_EXECUTABLE = slowBrowserExecutable;
+  process.env.BROWSER_STARTUP_TIMEOUT_MS = "10000";
+  process.env.BROWSER_CONNECT_TIMEOUT_MS = "10000";
+  process.env.BROWSER_STARTUP_ATTEMPTS = "1";
+  process.env.BROWSER_STARTUP_BUDGET_MS = "15000";
+
+  const sharedController = new AbortController();
+  const cancelledWaiter = withCancellationSignal(
+    sharedController.signal,
+    async () => await browserProvider.open(healthyUrl, "domcontentloaded", true),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const survivingWaiter = browserProvider.open(
+    healthyUrl,
+    "domcontentloaded",
+    true,
+  );
+  const sharedCancelTimer = setTimeout(() => {
+    sharedController.abort("cancel one shared browser waiter");
+  }, 150);
+
+  await assert.rejects(
+    () => cancelledWaiter,
+    (error: unknown) =>
+      error instanceof OperationCancelledError ||
+      (error instanceof Error && /OPERATION_CANCELLED/.test(error.message)),
+  );
+  clearTimeout(sharedCancelTimer);
+
+  const sharedRecovered = await survivingWaiter;
+  assert.equal(sharedRecovered.title, "Recovered");
+  await browserProvider.close();
+
+  const closeDuringStartup = browserProvider.open(
+    healthyUrl,
+    "domcontentloaded",
+    true,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  const closeStartedAt = Date.now();
+  await browserProvider.close();
+  const closeDuringStartupMs = Date.now() - closeStartedAt;
+  await assert.rejects(
+    () => closeDuringStartup,
+    (error: unknown) =>
+      error instanceof OperationCancelledError ||
+      (error instanceof Error && /OPERATION_CANCELLED/.test(error.message)),
+  );
+  assert.ok(
+    closeDuringStartupMs < 3_000,
+    `Browser close during cold start took too long: ${closeDuringStartupMs}ms`,
+  );
+
+  process.env.BROWSER_EXECUTABLE = realBrowserExecutable;
+  delete process.env.BROWSER_STARTUP_TIMEOUT_MS;
+  delete process.env.BROWSER_CONNECT_TIMEOUT_MS;
+  delete process.env.BROWSER_STARTUP_ATTEMPTS;
+  process.env.BROWSER_STARTUP_BUDGET_MS = "90000";
+
   const controller = new AbortController();
   const startedAt = Date.now();
   const timer = setTimeout(() => {
@@ -102,6 +221,11 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
+    browserColdStartCancellation: true,
+    startupCancelledInMs,
+    sharedLaunchCancellationIsolated: true,
+    closeDuringColdStartIsBounded: true,
+    closeDuringStartupMs,
     browserCancellationInterruptsPendingNavigation: true,
     cancelledInMs,
     cancelledPageDoesNotPoisonProvider: true,

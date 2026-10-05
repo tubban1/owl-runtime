@@ -72,6 +72,8 @@
     "verify:execution-target": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-target.ts",
     "verify:support-package": "OWL_RUNTIME_MODE=test tsx scripts/verify-support-package.ts",
     "verify:browser-cancellation": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-cancellation.ts",
+    "verify:browser-idle-freeze": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-idle-freeze.ts",
+    "verify:browser-survivor-reaper": "OWL_RUNTIME_MODE=test tsx scripts/verify-browser-restart-survivor-reaper.ts",
     "verify:desktop-postconditions": "OWL_RUNTIME_MODE=test tsx scripts/verify-desktop-postconditions.ts",
     "verify:rc-fast": "node scripts/verify-release-candidate.mjs",
     "verify:rc": "npm run verify:rc-fast && npm run soak:smoke",

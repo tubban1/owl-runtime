@@ -14,6 +14,10 @@ process.env.BROWSER_PROFILE_DIR = path.join(scratch, "browser-profile");
 process.env.ALLOW_BROWSER = "true";
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.OWL_APPROVAL_MODE = "compat";
+process.env.OWL_RUNTIME_REQUIRE_SIGNED_LEASE = "false";
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_PEM;
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_B64;
+delete process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE;
 
 const { browserProvider } = await import("../src/providers/browserProvider.js");
 const {
@@ -21,6 +25,17 @@ const {
   getPersistentTaskStatus,
   runPersistentTask,
 } = await import("../src/tasks/taskRuntime.js");
+const { authorizeRuntimeAccess } = await import(
+  "../src/runtime/runtimeAccessState.js"
+);
+
+await authorizeRuntimeAccess({
+  deviceId: "verify-browser-postconditions",
+  organizationId: "owl-runtime-test",
+  principalId: "verify-browser-postconditions",
+  canRun: true,
+  leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
+});
 
 const browserStatus = await browserProvider.status();
 if (!browserStatus.available) {

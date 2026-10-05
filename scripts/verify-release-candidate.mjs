@@ -63,6 +63,8 @@ const checks = [
   ["task-orchestration", "npm", ["run", "verify:task-orchestration"]],
   ["browser-postconditions", "npm", ["run", "verify:browser-postconditions"]],
   ["browser-cancellation", "npm", ["run", "verify:browser-cancellation"]],
+  ["browser-idle-freeze", "npm", ["run", "verify:browser-idle-freeze"]],
+  ["browser-survivor-reaper", "npm", ["run", "verify:browser-survivor-reaper"]],
   ["desktop-postconditions", "npm", ["run", "verify:desktop-postconditions"]],
   ["process-state", "npm", ["run", "verify:process-state"]],
   ["process-control", "npm", ["run", "verify:process-control"]],
