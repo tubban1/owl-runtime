@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { generateKeyPairSync, sign } from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -17,6 +18,60 @@ const packageJson = JSON.parse(
   await fs.readFile(path.join(root, "package.json"), "utf8"),
 ) as { version: string };
 const runtimeApiToken = "verify-upgrade-runtime-token";
+const { privateKey: leasePrivateKey, publicKey: leasePublicKey } =
+  generateKeyPairSync("ed25519");
+const leasePublicKeyB64 = Buffer.from(
+  leasePublicKey.export({ type: "spki", format: "pem" }).toString(),
+  "utf8",
+).toString("base64");
+
+function signedLeaseToken(overrides: Record<string, unknown> = {}) {
+  const now = Date.now();
+  const claims = {
+    schemaVersion: 1,
+    issuer: "owl-cloud",
+    audience: "owl-runtime",
+    leaseId: "lease_verify_upgrade_runtime",
+    userId: "upgrade-coordinator",
+    organizationId: "verify-upgrade",
+    deviceId: "verify-upgrade-runtime",
+    plan: "trial",
+    entitlementStatus: "trial_active",
+    entitlementVersion: 1,
+    features: {
+      runtime: true,
+      shell: true,
+      browser: true,
+      gui: true,
+      persistentTasks: true,
+      scheduler: true,
+      loops: true,
+      userSkills: true,
+      remoteCommands: true,
+      skillLibrary: true,
+      cloudWorker: true,
+    },
+    limits: {
+      devices: 1,
+      concurrentTasks: 2,
+      cloudWorkerMinutes: 300,
+      storageMb: 2048,
+    },
+    issuedAt: new Date(now - 1_000).toISOString(),
+    expiresAt: new Date(now + 10 * 60_000).toISOString(),
+    ...overrides,
+  };
+  const payload = Buffer.from(JSON.stringify(claims), "utf8").toString(
+    "base64url",
+  );
+  const input = `owllease1.${payload}`;
+  const signature = sign(
+    null,
+    Buffer.from(input, "utf8"),
+    leasePrivateKey,
+  ).toString("base64url");
+  return `${input}.${signature}`;
+}
 
 await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(scratch, { recursive: true });
@@ -118,6 +173,9 @@ function startRuntime(port: number, candidate: boolean) {
         OWL_STATE_ROOT: stateRoot,
         OWL_CANDIDATE_MODE: candidate ? "true" : "false",
         OWL_RUNTIME_API_TOKEN: runtimeApiToken,
+        OWL_RUNTIME_ACCESS_MODE: "enforced",
+        OWL_RUNTIME_REQUIRE_SIGNED_LEASE: "true",
+        OWL_RUNTIME_LEASE_PUBLIC_KEY_B64: leasePublicKeyB64,
         AUDIT_LOG_ENABLED: "false",
         PROCESS_MONITOR_POLL_MS: "60000",
         SCHEDULER_POLL_MS: "60000",
@@ -274,21 +332,16 @@ try {
   assert.equal(locked.mode, "enforced");
   assert.equal(locked.state, "LOCKED");
 
-  const leaseExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
   const authorized = await accessRpc(currentPort, "access.authorize", {
     deviceId: "verify-upgrade-runtime",
-    organizationId: "verify-upgrade",
-    principalId: "upgrade-coordinator",
-    canRun: true,
-    leaseExpiresAt,
-    evidence: {
-      source: "verify-upgrade-runtime",
-      purpose: "release-candidate-upgrade-coordination",
-    },
+    leaseToken: signedLeaseToken(),
   });
   assert.equal(authorized.mode, "enforced");
   assert.equal(authorized.state, "READY");
+  assert.equal(authorized.reasonCode, "AUTHORIZED_CLOUD_SIGNED_LEASE");
   assert.equal(authorized.grant?.deviceId, "verify-upgrade-runtime");
+  assert.equal(authorized.grant?.principalId, "upgrade-coordinator");
+  assert.equal(authorized.grant?.signatureVerified, true);
 
   const candidateAccess = await accessRpc(candidatePort, "access.get");
   assert.equal(candidateAccess.state, "READY");
@@ -395,7 +448,7 @@ try {
           compatibilityHealth: true,
         },
         productionAccessStartsLocked: true,
-        upgradeCoordinatorLease: true,
+        signedUpgradeCoordinatorLease: true,
         sharedCandidateAccessLease: true,
         publicRuntimeDrainControl: true,
         drainWait: true,
