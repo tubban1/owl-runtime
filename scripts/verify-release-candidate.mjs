@@ -9,11 +9,27 @@ const evidenceDir = path.join(root, ".release-evidence");
 const latestPath = path.join(evidenceDir, "rc-fast-latest.json");
 fs.mkdirSync(evidenceDir, { recursive: true });
 
+function isolatedVerifierEnv() {
+  const env = {
+    ...process.env,
+    OWL_RUNTIME_MODE: "test",
+    OWL_RUNTIME_ACCESS_MODE: "compat",
+    OWL_RUNTIME_REQUIRE_SIGNED_LEASE: "false",
+  };
+  // Release verification must never inherit the running Desktop/Cloud lease
+  // configuration from the developer shell. Verifiers that exercise signed
+  // leases set their own isolated key material explicitly.
+  delete env.OWL_RUNTIME_LEASE_PUBLIC_KEY_PEM;
+  delete env.OWL_RUNTIME_LEASE_PUBLIC_KEY_B64;
+  delete env.OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE;
+  return env;
+}
+
 function run(command, args, options = {}) {
   const startedAt = Date.now();
   const result = spawnSync(command, args, {
     cwd: root,
-    env: { ...process.env, OWL_RUNTIME_MODE: "test" },
+    env: isolatedVerifierEnv(),
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
     ...options,
