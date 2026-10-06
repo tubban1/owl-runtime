@@ -268,6 +268,7 @@ export async function executeCommand(
     id: `exec:${process.pid}:${randomBytes(8).toString("hex")}`,
     workspace,
     kind: "exec",
+    command,
   });
 
   try {
@@ -378,6 +379,7 @@ export async function startProcess(
     id: `managed:${processId}`,
     workspace,
     kind: "managed",
+    command,
   });
 
   const leaseContext =

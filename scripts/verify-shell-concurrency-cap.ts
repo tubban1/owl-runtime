@@ -25,6 +25,8 @@ process.env.ALLOWED_DIRECTORIES = scratch;
 process.env.ALLOW_SHELL = "true";
 process.env.OWL_SHELL_MAX_CONCURRENCY = "4";
 process.env.OWL_SHELL_MAX_CONCURRENCY_PER_WORKSPACE = "2";
+process.env.OWL_RESOURCE_TEST_PARALLELISM = "8";
+process.env.OWL_RESOURCE_TEST_PRESSURE_MODE = "normal";
 process.env.OWL_SHELL_CONCURRENCY_WAIT_MS = "3000";
 process.env.OWL_SHELL_CONCURRENCY_POLL_MS = "25";
 

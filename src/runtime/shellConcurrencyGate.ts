@@ -7,6 +7,12 @@ import {
   currentCancellationSignal,
   throwIfCancelled,
 } from "./cancellation.js";
+import {
+  classifyShellResourceDemand,
+  deriveShellAdmissionBudget,
+  detectHostResourceInventory,
+  type ResourceDemand,
+} from "./resourceAdmission.js";
 
 type PermitKind = "exec" | "managed";
 
@@ -15,6 +21,7 @@ type ActivePermit = {
   workspace: string;
   kind: PermitKind;
   acquiredAt: number;
+  demand: ResourceDemand;
 };
 
 type PendingPermit = {
@@ -22,6 +29,7 @@ type PendingPermit = {
   workspace: string;
   kind: PermitKind;
   enqueuedAt: number;
+  demand: ResourceDemand;
 };
 
 export type ShellConcurrencyPermit = {
@@ -29,6 +37,8 @@ export type ShellConcurrencyPermit = {
   workspace: string;
   kind: PermitKind;
   waitMs: number;
+  resourceClass: ResourceDemand["class"];
+  computeCredits: number;
   release: () => void;
 };
 
@@ -52,17 +62,17 @@ function processAlive(pid: number): boolean {
   }
 }
 
-const maxGlobal = boundedInteger(
+const hardGlobalSlots = boundedInteger(
   process.env.OWL_SHELL_MAX_CONCURRENCY,
-  4,
+  32,
+  1,
+  64,
+);
+const hardPerWorkspaceSlots = boundedInteger(
+  process.env.OWL_SHELL_MAX_CONCURRENCY_PER_WORKSPACE,
+  16,
   1,
   32,
-);
-const maxPerWorkspace = boundedInteger(
-  process.env.OWL_SHELL_MAX_CONCURRENCY_PER_WORKSPACE,
-  2,
-  1,
-  16,
 );
 const defaultWaitMs = boundedInteger(
   process.env.OWL_SHELL_CONCURRENCY_WAIT_MS,
@@ -111,22 +121,41 @@ async function loadRecoveredSnapshot(): Promise<ManagedProcessRecord[]> {
 
 async function recoveredManagedProcesses() {
   const records = await loadRecoveredSnapshot();
-  return records.filter(
-    (record) =>
-      processAlive(record.pid) &&
-      !active.has(`managed:${record.processId}`),
-  );
+  return records
+    .filter(
+      (record) =>
+        processAlive(record.pid) &&
+        !active.has(`managed:${record.processId}`),
+    )
+    .map((record) => ({
+      record,
+      demand: classifyShellResourceDemand(record.command),
+    }));
+}
+
+function totalCredits(
+  items: Array<{ demand: ResourceDemand }>,
+): number {
+  return items.reduce((total, item) => total + item.demand.computeCredits, 0);
+}
+
+function totalSlots(
+  items: Array<{ demand: ResourceDemand }>,
+): number {
+  return items.reduce((total, item) => total + item.demand.processSlots, 0);
 }
 
 export async function acquireShellConcurrencyPermit(input: {
   id: string;
   workspace: string;
   kind: PermitKind;
+  command: string;
   waitMs?: number;
 }): Promise<ShellConcurrencyPermit> {
   const signal = currentCancellationSignal();
   throwIfCancelled(signal);
 
+  const demand = classifyShellResourceDemand(input.command);
   const waitLimitMs =
     input.waitMs === undefined
       ? defaultWaitMs
@@ -137,31 +166,55 @@ export async function acquireShellConcurrencyPermit(input: {
     workspace: input.workspace,
     kind: input.kind,
     enqueuedAt,
+    demand,
   });
 
   try {
     while (true) {
       throwIfCancelled(signal);
 
+      const inventory = detectHostResourceInventory();
+      const budget = deriveShellAdmissionBudget(inventory, {
+        globalSlots: hardGlobalSlots,
+        perWorkspaceSlots: hardPerWorkspaceSlots,
+      });
       const recovered = await recoveredManagedProcesses();
       const activePermits = [...active.values()];
-      const globalCount = activePermits.length + recovered.length;
-      const workspaceCount =
-        activePermits.filter((permit) => permit.workspace === input.workspace)
-          .length +
-        recovered.filter((record) => record.workspace === input.workspace)
-          .length;
+      const activeItems = activePermits.map((permit) => ({
+        workspace: permit.workspace,
+        demand: permit.demand,
+      }));
+      const recoveredItems = recovered.map(({ record, demand }) => ({
+        workspace: record.workspace,
+        demand,
+      }));
+      const allItems = [...activeItems, ...recoveredItems];
+      const workspaceItems = allItems.filter(
+        (item) => item.workspace === input.workspace,
+      );
 
-      if (
-        globalCount < maxGlobal &&
-        workspaceCount < maxPerWorkspace
-      ) {
+      const globalSlots = totalSlots(allItems);
+      const workspaceSlots = totalSlots(workspaceItems);
+      const globalCredits = totalCredits(allItems);
+      const workspaceCredits = totalCredits(workspaceItems);
+
+      const slotsFit =
+        globalSlots + demand.processSlots <= budget.globalSlots &&
+        workspaceSlots + demand.processSlots <= budget.perWorkspaceSlots;
+      const creditsFit =
+        globalCredits + demand.computeCredits <=
+          budget.globalComputeCredits &&
+        workspaceCredits + demand.computeCredits <=
+          budget.perWorkspaceComputeCredits;
+
+      if (slotsFit && creditsFit) {
         const acquiredAt = Date.now();
         active.set(input.id, {
           id: input.id,
           workspace: input.workspace,
           kind: input.kind,
           acquiredAt,
+          demand,
         });
         pending.delete(input.id);
 
@@ -171,6 +224,8 @@ export async function acquireShellConcurrencyPermit(input: {
           workspace: input.workspace,
           kind: input.kind,
           waitMs: acquiredAt - enqueuedAt,
+          resourceClass: demand.class,
+          computeCredits: demand.computeCredits,
           release: () => {
             if (released) return;
             released = true;
@@ -182,15 +237,32 @@ export async function acquireShellConcurrencyPermit(input: {
       const elapsed = Date.now() - enqueuedAt;
       if (elapsed >= waitLimitMs) {
         const error = new Error(
-          `SHELL_CAPACITY_BUSY: workspace has ${workspaceCount}/${maxPerWorkspace} active shell processes and Runtime has ${globalCount}/${maxGlobal}. Retry after an existing process completes or use a separate worktree.`,
+          [
+            "SHELL_CAPACITY_BUSY:",
+            `mode=${budget.mode}`,
+            `workspace slots ${workspaceSlots}/${budget.perWorkspaceSlots}`,
+            `workspace credits ${workspaceCredits}/${budget.perWorkspaceComputeCredits}`,
+            `runtime slots ${globalSlots}/${budget.globalSlots}`,
+            `runtime credits ${globalCredits}/${budget.globalComputeCredits}`,
+            `requested=${demand.class}:${demand.computeCredits} credits.`,
+            "Retry after capacity recovers or use a separate worktree/target.",
+          ].join(" "),
         );
-        (error as Error & { code?: string; retryAfterMs?: number }).code =
-          "SHELL_CAPACITY_BUSY";
-        (error as Error & { retryAfterMs?: number }).retryAfterMs = pollMs;
+        const typed = error as Error & {
+          code?: string;
+          retryAfterMs?: number;
+          admissionMode?: string;
+        };
+        typed.code = "SHELL_CAPACITY_BUSY";
+        typed.retryAfterMs = pollMs;
+        typed.admissionMode = budget.mode;
         throw error;
       }
 
-      await cancellableSleep(Math.min(pollMs, waitLimitMs - elapsed), signal);
+      await cancellableSleep(
+        Math.min(pollMs, waitLimitMs - elapsed),
+        signal,
+      );
     }
   } finally {
     pending.delete(input.id);
@@ -198,11 +270,19 @@ export async function acquireShellConcurrencyPermit(input: {
 }
 
 export async function shellConcurrencyStatus() {
+  const inventory = detectHostResourceInventory();
+  const budget = deriveShellAdmissionBudget(inventory, {
+    globalSlots: hardGlobalSlots,
+    perWorkspaceSlots: hardPerWorkspaceSlots,
+  });
   const recovered = await recoveredManagedProcesses();
+
   return {
-    limits: {
-      global: maxGlobal,
-      perWorkspace: maxPerWorkspace,
+    inventory,
+    budget,
+    hardCeilings: {
+      globalSlots: hardGlobalSlots,
+      perWorkspaceSlots: hardPerWorkspaceSlots,
       waitMs: defaultWaitMs,
     },
     active: [
@@ -212,17 +292,25 @@ export async function shellConcurrencyStatus() {
         kind: permit.kind,
         source: "runtime" as const,
         activeMs: Date.now() - permit.acquiredAt,
+        resourceClass: permit.demand.class,
+        computeCredits: permit.demand.computeCredits,
       })),
-      ...recovered.map((record) => ({
+      ...recovered.map(({ record, demand }) => ({
         id: `managed:${record.processId}`,
         workspace: record.workspace,
         kind: "managed" as const,
         source: "recovered" as const,
         activeMs: Math.max(0, Date.now() - Date.parse(record.startedAt)),
+        resourceClass: demand.class,
+        computeCredits: demand.computeCredits,
       })),
     ],
     pending: [...pending.values()].map((permit) => ({
-      ...permit,
+      id: permit.id,
+      workspace: permit.workspace,
+      kind: permit.kind,
+      resourceClass: permit.demand.class,
+      computeCredits: permit.demand.computeCredits,
       waitingMs: Date.now() - permit.enqueuedAt,
     })),
   };
