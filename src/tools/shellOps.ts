@@ -23,6 +23,7 @@ import {
   claimWorkspaceLeaseForRecoveredProcess,
   ensureWorkspaceWriteLease,
   pinWorkspaceLeaseForProcess,
+  releaseWorkspaceLeasesForTask,
   unpinWorkspaceLeaseForProcess,
 } from "../runtime/workspaceLeaseManager.js";
 import { runtimeSessionManager } from "../runtime/runtimeSessionManager.js";
@@ -34,6 +35,10 @@ import {
   OperationCancelledError,
   throwIfCancelled,
 } from "../runtime/cancellation.js";
+import {
+  acquireShellConcurrencyPermit,
+  releaseShellConcurrencyPermit,
+} from "../runtime/shellConcurrencyGate.js";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const runtimeInstanceId =
@@ -152,6 +157,7 @@ async function markExited(
     await writeManagedProcess(record);
   } finally {
     liveChildren.delete(processId);
+    releaseShellConcurrencyPermit(`managed:${processId}`);
     await unpinWorkspaceLeaseForProcess(processId).catch(() => undefined);
   }
 }
@@ -178,6 +184,7 @@ async function reconcileRecord(
       record.inputAvailable = false;
       await writeManagedProcess(record);
       liveChildren.delete(record.processId);
+      releaseShellConcurrencyPermit(`managed:${record.processId}`);
       await unpinWorkspaceLeaseForProcess(record.processId).catch(
         () => undefined,
       );
@@ -221,6 +228,7 @@ async function reconcileRecord(
   latest.inputAvailable = false;
   latest.exitCode = latest.exitCode ?? null;
   await writeManagedProcess(latest);
+  releaseShellConcurrencyPermit(`managed:${latest.processId}`);
   await unpinWorkspaceLeaseForProcess(latest.processId).catch(
     () => undefined,
   );
@@ -253,10 +261,17 @@ export async function executeCommand(
 ) {
   requireCapability("ALLOW_SHELL", false);
   const safeCwd = await assertAllowedExistingPath(cwd);
+  const workspace = await resolveWorkspace(safeCwd);
   const cancellationSignal = currentCancellationSignal();
   throwIfCancelled(cancellationSignal);
+  const concurrencyPermit = await acquireShellConcurrencyPermit({
+    id: `exec:${process.pid}:${randomBytes(8).toString("hex")}`,
+    workspace,
+    kind: "exec",
+  });
 
-  return await new Promise<{
+  try {
+    return await new Promise<{
     command: string;
     cwd: string;
     exitCode: number | null;
@@ -342,7 +357,10 @@ export async function executeCommand(
         timedOut,
       });
     });
-  });
+    });
+  } finally {
+    concurrencyPermit.release();
+  }
 }
 
 export async function startProcess(
@@ -356,123 +374,186 @@ export async function startProcess(
   const processId = newManagedProcessId();
   const controlToken = newProcessControlToken();
   const context = currentExecutionContext();
+  const concurrencyPermit = await acquireShellConcurrencyPermit({
+    id: `managed:${processId}`,
+    workspace,
+    kind: "managed",
+  });
 
   const leaseContext =
     workspaceMode === "write" && !context.taskId
       ? { ...context, taskId: `process:${processId}` }
       : context;
 
-  let workspaceLeaseId: string | undefined;
-  if (workspaceMode === "write") {
-    const lease = await ensureWorkspaceWriteLease(workspace, {
-      context: leaseContext,
-      purpose: `Long-running process ${processId}`,
-      auto: true,
-    });
-    workspaceLeaseId = lease.id;
-  }
+  let child: ChildProcess | undefined;
+  let permitTransferredToProcess = false;
 
-  const logs = processLogPaths(processId);
-  await Promise.all([
-    ensureLogFile(logs.stdoutPath),
-    ensureLogFile(logs.stderrPath),
-  ]);
-
-  const stdoutFd = fsSync.openSync(logs.stdoutPath, "a", 0o600);
-  const stderrFd = fsSync.openSync(logs.stderrPath, "a", 0o600);
-
-  let child: ChildProcess;
   try {
-    child = spawn(shellBinary(), ["-c", command], {
-      cwd: safeCwd,
-      env: process.env,
-      detached: true,
-      stdio: ["pipe", stdoutFd, stderrFd],
-    });
-  } finally {
-    fsSync.closeSync(stdoutFd);
-    fsSync.closeSync(stderrFd);
-  }
+    let workspaceLeaseId: string | undefined;
+    if (workspaceMode === "write") {
+      const lease = await ensureWorkspaceWriteLease(workspace, {
+        context: leaseContext,
+        purpose: `Long-running process ${processId}`,
+        auto: true,
+      });
+      workspaceLeaseId = lease.id;
+    }
 
-  if (!child.pid) {
-    child.kill("SIGKILL");
-    throw new Error("Managed process failed to obtain a PID.");
-  }
+    const logs = processLogPaths(processId);
+    await Promise.all([
+      ensureLogFile(logs.stdoutPath),
+      ensureLogFile(logs.stderrPath),
+    ]);
 
-  const now = new Date().toISOString();
-  const record: ManagedProcessRecord = {
-    version: 1,
-    processId,
-    pid: child.pid,
-    command,
-    cwd: safeCwd,
-    workspace,
-    workspaceMode,
-    ...(workspaceLeaseId ? { workspaceLeaseId } : {}),
-    ownerSessionId: context.sessionId,
-    ...(context.taskId ? { ownerTaskId: context.taskId } : {}),
-    controlTokenHash: hashProcessControlToken(controlToken),
-    startedAt: now,
-    updatedAt: now,
-    status: "running",
-    runtimeInstanceId,
-    stdoutPath: logs.stdoutPath,
-    stderrPath: logs.stderrPath,
-    inputAvailable: Boolean(child.stdin?.writable),
-  };
+    const stdoutFd = fsSync.openSync(logs.stdoutPath, "a", 0o600);
+    const stderrFd = fsSync.openSync(logs.stderrPath, "a", 0o600);
 
-  await writeManagedProcess(record);
+    try {
+      child = spawn(shellBinary(), ["-c", command], {
+        cwd: safeCwd,
+        env: process.env,
+        detached: true,
+        stdio: ["pipe", stdoutFd, stderrFd],
+      });
+    } finally {
+      fsSync.closeSync(stdoutFd);
+      fsSync.closeSync(stderrFd);
+    }
 
-  if (workspaceMode === "write") {
-    const pinned = await pinWorkspaceLeaseForProcess(
-      workspace,
+    if (!child.pid) {
+      child.kill("SIGKILL");
+      throw new Error("Managed process failed to obtain a PID.");
+    }
+
+    const now = new Date().toISOString();
+    const record: ManagedProcessRecord = {
+      version: 1,
       processId,
-      leaseContext,
-    );
-    record.workspaceLeaseId = pinned.id;
+      pid: child.pid,
+      command,
+      cwd: safeCwd,
+      workspace,
+      workspaceMode,
+      ...(workspaceLeaseId ? { workspaceLeaseId } : {}),
+      ownerSessionId: context.sessionId,
+      ...(context.taskId ? { ownerTaskId: context.taskId } : {}),
+      controlTokenHash: hashProcessControlToken(controlToken),
+      startedAt: now,
+      updatedAt: now,
+      status: "running",
+      runtimeInstanceId,
+      stdoutPath: logs.stdoutPath,
+      stderrPath: logs.stderrPath,
+      inputAvailable: Boolean(child.stdin?.writable),
+    };
+
     await writeManagedProcess(record);
+
+    if (workspaceMode === "write") {
+      const pinned = await pinWorkspaceLeaseForProcess(
+        workspace,
+        processId,
+        leaseContext,
+      );
+      record.workspaceLeaseId = pinned.id;
+      await writeManagedProcess(record);
+    }
+
+    liveChildren.set(processId, { child });
+
+    child.once("exit", (code, signal) => {
+      void markExited(processId, code, signal).catch(() => undefined);
+    });
+    child.once("error", (error) => {
+      void fs
+        .appendFile(
+          logs.stderrPath,
+          `\n[AgentOS process error] ${error.message}\n`,
+          { encoding: "utf8", mode: 0o600 },
+        )
+        .catch(() => undefined);
+    });
+
+    child.unref();
+    const stdinHandle = child.stdin as unknown as { unref?: () => void } | null;
+    stdinHandle?.unref?.();
+
+    permitTransferredToProcess = true;
+    return {
+      processId,
+      pid: child.pid,
+      command,
+      cwd: safeCwd,
+      workspace,
+      workspaceMode,
+      workspaceLeaseId: record.workspaceLeaseId ?? null,
+      ownerSessionId: record.ownerSessionId,
+      ownerTaskId: record.ownerTaskId ?? null,
+      controlToken,
+      stdoutPath: record.stdoutPath,
+      stderrPath: record.stderrPath,
+      concurrencyWaitMs: concurrencyPermit.waitMs,
+      durable: true,
+    };
+  } catch (error) {
+    if (child?.pid) {
+      try {
+        signalProcessGroup(child, "SIGTERM");
+      } catch {
+        // Best-effort cleanup for a partially initialized child.
+      }
+    }
+    if (workspaceMode === "write" && !context.taskId) {
+      await releaseWorkspaceLeasesForTask(`process:${processId}`).catch(
+        () => undefined,
+      );
+    }
+    throw error;
+  } finally {
+    if (!permitTransferredToProcess) concurrencyPermit.release();
   }
-
-  liveChildren.set(processId, { child });
-
-  child.once("exit", (code, signal) => {
-    void markExited(processId, code, signal).catch(() => undefined);
-  });
-  child.once("error", (error) => {
-    void fs
-      .appendFile(
-        logs.stderrPath,
-        `\n[AgentOS process error] ${error.message}\n`,
-        { encoding: "utf8", mode: 0o600 },
-      )
-      .catch(() => undefined);
-  });
-
-  child.unref();
-  const stdinHandle = child.stdin as unknown as { unref?: () => void } | null;
-  stdinHandle?.unref?.();
-
-  return {
-    processId,
-    pid: child.pid,
-    command,
-    cwd: safeCwd,
-    workspace,
-    workspaceMode,
-    workspaceLeaseId: record.workspaceLeaseId ?? null,
-    ownerSessionId: record.ownerSessionId,
-    ownerTaskId: record.ownerTaskId ?? null,
-    controlToken,
-    stdoutPath: record.stdoutPath,
-    stderrPath: record.stderrPath,
-    durable: true,
-  };
 }
 
-export async function listProcesses() {
+export async function listProcesses(options: {
+  terminalLimit?: number;
+  workspace?: string;
+  runningOnly?: boolean;
+} = {}) {
   const records = await listManagedProcesses();
   const reconciled = await Promise.all(records.map(reconcileRecord));
-  return reconciled.map((record) => ({
+  const workspace = options.workspace
+    ? await resolveWorkspace(options.workspace)
+    : null;
+  const scoped = workspace
+    ? reconciled.filter((record) => record.workspace === workspace)
+    : reconciled;
+
+  const running = scoped.filter(
+    (record) => record.status === "running" || record.status === "terminating",
+  );
+  const terminalLimit = Math.min(
+    Math.max(
+      Math.trunc(
+        options.terminalLimit ??
+          Number(process.env.OWL_PROCESS_LIST_TERMINAL_LIMIT ?? 40),
+      ),
+      0,
+    ),
+    200,
+  );
+  const selected = options.runningOnly
+    ? running
+    : [
+        ...running,
+        ...scoped
+          .filter(
+            (record) =>
+              record.status !== "running" && record.status !== "terminating",
+          )
+          .slice(0, terminalLimit),
+      ].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+  return selected.map((record) => ({
     processId: record.processId,
     pid: record.pid,
     command: record.command,
