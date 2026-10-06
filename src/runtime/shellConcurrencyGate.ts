@@ -1,4 +1,7 @@
-import { listManagedProcesses } from "./processStore.js";
+import {
+  listManagedProcesses,
+  type ManagedProcessRecord,
+} from "./processStore.js";
 import {
   cancellableSleep,
   currentCancellationSignal,
@@ -77,15 +80,39 @@ const pollMs = boundedInteger(
 const active = new Map<string, ActivePermit>();
 const pending = new Map<string, PendingPermit>();
 
+let recoveredSnapshot: ManagedProcessRecord[] | null = null;
+let recoveredSnapshotPromise: Promise<ManagedProcessRecord[]> | null = null;
+
 export function releaseShellConcurrencyPermit(id: string): void {
   active.delete(id);
 }
 
+async function loadRecoveredSnapshot(): Promise<ManagedProcessRecord[]> {
+  if (recoveredSnapshot) return recoveredSnapshot;
+  if (recoveredSnapshotPromise) return await recoveredSnapshotPromise;
+
+  recoveredSnapshotPromise = listManagedProcesses()
+    .then((records) =>
+      records.filter(
+        (record) =>
+          record.status === "running" || record.status === "terminating",
+      ),
+    )
+    .then((records) => {
+      recoveredSnapshot = records;
+      return records;
+    })
+    .finally(() => {
+      recoveredSnapshotPromise = null;
+    });
+
+  return await recoveredSnapshotPromise;
+}
+
 async function recoveredManagedProcesses() {
-  const records = await listManagedProcesses();
+  const records = await loadRecoveredSnapshot();
   return records.filter(
     (record) =>
-      (record.status === "running" || record.status === "terminating") &&
       processAlive(record.pid) &&
       !active.has(`managed:${record.processId}`),
   );
