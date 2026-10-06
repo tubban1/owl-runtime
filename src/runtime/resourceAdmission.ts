@@ -381,8 +381,22 @@ export function deriveShellAdmissionBudget(
     ),
   );
 
-  const globalComputeCredits = globalSlots * 2;
-  const perWorkspaceComputeCredits = perWorkspaceSlots * 2;
+  // NORMAL and CONSTRAINED must still admit one heavy workload.
+  // PROTECTIVE/DRAIN_ONLY intentionally block new heavy work by keeping the
+  // available compute-credit budget below the heavy demand (4 credits).
+  const heavySingleTaskFloor =
+    inventory.pressure.mode === "normal" ||
+    inventory.pressure.mode === "constrained"
+      ? 4
+      : 0;
+  const globalComputeCredits = Math.max(
+    globalSlots * 2,
+    heavySingleTaskFloor,
+  );
+  const perWorkspaceComputeCredits = Math.max(
+    perWorkspaceSlots * 2,
+    heavySingleTaskFloor,
+  );
 
   return {
     mode: inventory.pressure.mode,

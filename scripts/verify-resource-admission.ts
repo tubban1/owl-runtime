@@ -106,6 +106,16 @@ assert.deepEqual(deriveShellAdmissionBudget(eightCpuNormal), {
   perWorkspaceComputeCredits: 4,
 });
 
+const constrained = structuredClone(eightCpuNormal);
+constrained.pressure.mode = "constrained";
+assert.deepEqual(deriveShellAdmissionBudget(constrained), {
+  mode: "constrained",
+  globalSlots: 3,
+  perWorkspaceSlots: 1,
+  globalComputeCredits: 6,
+  perWorkspaceComputeCredits: 4,
+});
+
 const protective = structuredClone(eightCpuNormal);
 protective.pressure.mode = "protective";
 assert.deepEqual(deriveShellAdmissionBudget(protective), {
@@ -133,6 +143,7 @@ console.log(
       gpuOnlyPlacement: "PASS",
       tpuMismatch: "PASS",
       dynamicEightCpuBudget: "PASS",
+      constrainedAllowsOneHeavyTask: "PASS",
       pressureDownshift: "PASS",
       shellClassification: "PASS",
     },
