@@ -14,6 +14,16 @@ const ALLOWED = new Set([
   "browser_companion_agent_tabs",
   "browser_companion_use_agent_tab",
   "browser_companion_close_agent_tab",
+  "browser_agent_open",
+  "browser_agent_tabs",
+  "browser_agent_use_tab",
+  "browser_agent_snapshot",
+  "browser_agent_fill",
+  "browser_agent_click",
+  "browser_agent_screenshot",
+  "browser_agent_focus_login",
+  "browser_agent_close_tab",
+  "browser_agent_status",
 ]);
 
 function endpoint(): URL {

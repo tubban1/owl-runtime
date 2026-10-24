@@ -1446,28 +1446,74 @@ function createServer() {
     },
   );
 
+  // All native Chrome operations forward through the local Connection Host,
+  // which keeps ONE long-lived Chrome DevTools MCP connection for all Agents.
+  // Every tool is filtered to a tab that this stable OWL owner created.
   server.tool(
     "browser_agent_open",
-    "DEFAULT AGENT WEBSITE MODE: Open a background tab in OWL Runtime's managed persistent Chrome profile, not the user's everyday Chrome. No Chrome Companion, pairing code or per-tab/site authorization is required. The same agent can navigate, type, click, inspect and screenshot its own tabs. User may sign in once inside OWL Chrome if needed; Runtime security policy still governs consequential actions.",
-    {
-      url: z.string().url(),
-      wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
-      headless: z.boolean().optional(),
+    "DEFAULT: create a background tab in the user's existing normal Google Chrome with signed-in profile, NOT OWL's separate headless browser. Chrome 144+ must first allow remote debugging at chrome://inspect/#remote-debugging, with one Chrome confirmation per Host connection. No Chrome Companion pairing or per-tab grant.",
+    {url:z.string().url(),headless:z.boolean().optional()},
+    {title:"Open Agent Tab in My Chrome",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async({url,headless})=>{
+      try{
+        if(headless)throw new Error("CHROME_NATIVE_NEVER_HEADLESS");
+        return companionOk(await callDesktopCompanion("browser_agent_open",{url}));
+      }catch(error){return fail(error);}
     },
-    { title: "OWL Agent Browser Open (No Pairing)", readOnlyHint: false,
-      destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ url, wait_until, headless }) => {
-      try {
-        return ok((await executeRoutedAction("browser.open", {
-          url, wait_until: wait_until ?? "domcontentloaded", headless,
-        })).result);
-      } catch (error) { return fail(error); }
-    },
+  );
+  server.tool(
+    "browser_agent_tabs","List only user Chrome tabs created by this OWL owner.",
+    {},{title:"My User Chrome Tabs",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_tabs"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_use_tab","Select an OWL-owned background tab without changing Chrome foreground.",
+    {page_id:z.number().int().nonnegative()},
+    {title:"Use My User Chrome Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({page_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_use_tab",{page_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_snapshot","Read the selected OWL-created Chrome tab accessibility tree.",
+    {},{title:"Read My User Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_snapshot"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_fill","Fill non-credential field UID from the latest snapshot, without submitting.",
+    {uid:z.string().min(1).max(180),value:z.string().max(4000)},
+    {title:"Fill My User Chrome Field",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid,value})=>{try{return companionOk(await callDesktopCompanion("browser_agent_fill",{uid,value}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_click","Click one known element UID on this OWL-created tab; consequential changes need authorized user intent.",
+    {uid:z.string().min(1).max(180)},
+    {title:"Click My User Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid})=>{try{return companionOk(await callDesktopCompanion("browser_agent_click",{uid}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_screenshot","Screenshot the Agent-created Chrome tab without switching to it; returns native image content.",
+    {},{title:"Screenshot My User Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_screenshot"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_focus_login","Bring ONLY this Agent-created Chrome tab to foreground when the user must solve CAPTCHA or sign in; then Agent continues.",
+    {},{title:"Hand Chrome Tab to Human",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_focus_login"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_close_tab","Close only an OWL-created Chrome tab identified by page_id.",
+    {page_id:z.number().int().nonnegative()},
+    {title:"Close My User Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+    async({page_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_close_tab",{page_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_status","Check persistent Chrome DevTools MCP Host connection status and readiness.",
+    {},{title:"Chrome Agent Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_status"));}catch(error){return fail(error);}},
   );
 
   server.tool(
     "browser_open",
-    "Open a URL in OWL-managed Chromium; prefer browser_agent_open for fully automated agent-owned browser tabs. Unlike Chrome Companion this requires no pairing or per-site/tab grant; uses a distinct persistent OWL profile. Requires ALLOW_BROWSER=true.",
+    "OPTIONAL isolated OWL Chromium mode (may be headless and require separate login). For the user\'s already-signed-in normal Chrome, use browser_agent_open and browser_agent_snapshot/fill/click/screenshot; do not switch global headless mode to solve user login challenges. Requires ALLOW_BROWSER=true.",
     {
       url: z.string().url(),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
