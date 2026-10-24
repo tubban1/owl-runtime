@@ -1447,8 +1447,27 @@ function createServer() {
   );
 
   server.tool(
+    "browser_agent_open",
+    "DEFAULT AGENT WEBSITE MODE: Open a background tab in OWL Runtime's managed persistent Chrome profile, not the user's everyday Chrome. No Chrome Companion, pairing code or per-tab/site authorization is required. The same agent can navigate, type, click, inspect and screenshot its own tabs. User may sign in once inside OWL Chrome if needed; Runtime security policy still governs consequential actions.",
+    {
+      url: z.string().url(),
+      wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
+      headless: z.boolean().optional(),
+    },
+    { title: "OWL Agent Browser Open (No Pairing)", readOnlyHint: false,
+      destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async ({ url, wait_until, headless }) => {
+      try {
+        return ok((await executeRoutedAction("browser.open", {
+          url, wait_until: wait_until ?? "domcontentloaded", headless,
+        })).result);
+      } catch (error) { return fail(error); }
+    },
+  );
+
+  server.tool(
     "browser_open",
-    "Open a URL in the managed Chromium browser provider. Requires ALLOW_BROWSER=true.",
+    "Open a URL in OWL-managed Chromium; prefer browser_agent_open for fully automated agent-owned browser tabs. Unlike Chrome Companion this requires no pairing or per-site/tab grant; uses a distinct persistent OWL profile. Requires ALLOW_BROWSER=true.",
     {
       url: z.string().url(),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),

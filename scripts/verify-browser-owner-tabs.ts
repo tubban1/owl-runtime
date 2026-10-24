@@ -77,6 +77,22 @@ try {
     browserProvider.open(url + "/alpha", "domcontentloaded", false)),
     /Cannot change managed browser headless mode/);
 
+  // Opening more tabs is automatic within a Session: no pairing or per-tab grant.
+  const alphaExtra = await runAs("alpha", () => browserProvider.newTab(url + "/alpha-extra"));
+  const alphaOwned = await runAs("alpha", () => browserProvider.listTabs());
+  assert.equal(alphaOwned.length, 2);
+  assert.equal(alphaOwned.some(tab => tab.tabId === alpha.tabId), true);
+  assert.equal(alphaOwned.some(tab => tab.tabId === alphaExtra.tabId), true);
+  assert.equal((await runAs("beta", () => browserProvider.listTabs())).length, 1);
+  assert.equal((await runAs("gamma", () => browserProvider.listTabs())).length, 0);
+  await assert.rejects(() => runAs("beta", () => browserProvider.useTab(undefined, alphaExtra.tabId)),
+    /not assigned to this Runtime owner/);
+  const humanTab = (await browserProvider.listTabs()).find(tab => tab.url.endsWith("/human"));
+  assert.ok(humanTab);
+  await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(undefined, humanTab.tabId)),
+    /not assigned to this Runtime owner/);
+  await runAs("alpha", () => browserProvider.useTab(undefined, alpha.tabId));
+
   const tabA = await runAs("alpha", () => browserProvider.listTabs());
   const tabB = await runAs("beta", () => browserProvider.listTabs());
   assert.equal(tabA.filter(t => t.active).length, 1);
@@ -105,11 +121,11 @@ try {
   await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(undefined, "f".repeat(32))),
     /not found/);
   await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(undefined, beta.tabId)),
-    /assigned to another Runtime owner/);
-  const latestBeta = reordered.find(t => t.tabId === beta.tabId);
+    /not assigned to this Runtime owner/);
+  const latestBeta = (await browserProvider.listTabs()).find(t => t.tabId === beta.tabId);
   assert.ok(latestBeta);
   await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(latestBeta.index)),
-    /assigned to another Runtime owner/);
+    /not assigned to this Runtime owner/);
 
   // Explicit one-use handoff binds the secret to a named successor.
   const handoff = await runAs("alpha", () =>
@@ -135,7 +151,7 @@ try {
   assert.equal((await runAs("gamma", () => browserProvider.snapshot())).title, "alpha");
   await assert.rejects(
     () => runAs("alpha", () => browserProvider.useTab(undefined, alpha.tabId)),
-    /assigned to another Runtime owner/,
+    /not assigned to this Runtime owner/,
   );
   // Any origin change invalidates the already-issued handoff.
   const second = await runAs("gamma", () =>

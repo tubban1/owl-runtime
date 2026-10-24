@@ -336,6 +336,9 @@ class BrowserProvider implements ComputerProvider {
   private activePage: Page | null = null;
   // An agent's logical tab must remain independent of Chrome's foreground tab.
   private ownedPages = new Map<string, Page>();
+  // All pages created by a Session remain owned, even after it opens another tab.
+  // A stable tab ID is a locator, never a substitute for session authorization.
+  private pageOwners = new WeakMap<Page, string>();
   private agentCreatedPages = new WeakSet<Page>();
   private tabIds = new WeakMap<Page, string>();
   private handoffGrants = new Map<string, {
@@ -1043,6 +1046,7 @@ class BrowserProvider implements ComputerProvider {
       if (pinned) return pinned;
       const created = await this.createBackgroundPage(context);
       this.ownedPages.set(owner, created);
+      this.pageOwners.set(created, owner);
       return created;
     }
     if (this.activePage && !this.activePage.isClosed()) return this.activePage;
@@ -1072,9 +1076,11 @@ class BrowserProvider implements ComputerProvider {
       const context = await this.ensureContext();
       const owner = this.currentTabOwner();
       const scoped = owner ? this.findOwnedPage(owner) : null;
+      const pages = context.pages();
+      const visible = owner ? pages.filter(page => this.pageOwners.get(page) === owner) : pages;
       return await Promise.all(
-        context.pages().map(async (page, index) => ({
-          index,
+        visible.map(async (page) => ({
+          index: pages.indexOf(page),
           tabId: await this.tabId(page),
           active: page === (owner ? scoped : this.activePage),
           url: page.url(),
@@ -1103,10 +1109,9 @@ class BrowserProvider implements ComputerProvider {
       const page = pages[resolvedIndex!];
       const owner = this.currentTabOwner();
       if (owner) {
-        for (const [otherOwner, otherPage] of this.ownedPages) {
-          if (otherOwner !== owner && otherPage === page && !page.isClosed()) {
-            throw new Error("Browser tab is already assigned to another Runtime owner.");
-          }
+        const assignedOwner = this.pageOwners.get(page);
+        if (assignedOwner !== owner) {
+          throw new Error("Browser tab is not assigned to this Runtime owner; another owner\'s or human page cannot be selected.");
         }
         this.ownedPages.set(owner, page);
       } else {
@@ -1125,8 +1130,10 @@ class BrowserProvider implements ComputerProvider {
       const context = await this.ensureContext();
       const owner = this.currentTabOwner();
       const page = owner ? await this.createBackgroundPage(context) : await context.newPage();
-      if (owner) this.ownedPages.set(owner, page);
-      else this.activePage = page;
+      if (owner) {
+        this.ownedPages.set(owner, page);
+        this.pageOwners.set(page, owner);
+      } else this.activePage = page;
       if (url) {
         await withBrowserCancellation(page, async () => {
           await page.goto(url, { waitUntil, timeout: 60_000 });
@@ -1506,6 +1513,7 @@ class BrowserProvider implements ComputerProvider {
       // Atomic move: no await between removing the source and adding target.
       this.ownedPages.delete(grant.source);
       this.ownedPages.set(target, grant.page);
+      this.pageOwners.set(grant.page, target);
       this.handoffGrants.delete(key);
       return {
         claimed: true, tabId: grant.tabId, origin: grant.origin,
@@ -1519,6 +1527,7 @@ class BrowserProvider implements ComputerProvider {
     if (owner) {
       const page = this.findOwnedPage(owner);
       this.ownedPages.delete(owner);
+      if (page) this.pageOwners.delete(page);
       for (const [key, grant] of this.handoffGrants) {
         if (grant.source === owner || grant.page === page) this.handoffGrants.delete(key);
       }
