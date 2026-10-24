@@ -1533,6 +1533,36 @@ function createServer() {
     async({file_tickets})=>{try{return companionOk(await callDesktopCompanion("browser_agent_release_file",{file_tickets}));}catch(error){return fail(error);}},
   );
   server.tool(
+    "browser_agent_download_file","Download an Agent-owned safe file link by UID, with request-id deduplication.",
+    {link_uid:z.string().min(1).max(120),request_id:z.string().uuid()},{title:"browser_agent_download_file",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async({link_uid,request_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_download_file",{link_uid,request_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_download_status","Read owner-scoped Chrome download status, without local paths.",
+    {download_id:z.number().int().nonnegative()},{title:"browser_agent_download_status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async({download_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_download_status",{download_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_download_list","List only Chrome downloads created by the current Agent Session.",
+    {},{title:"browser_agent_download_list",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_download_list"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_download_cancel","Cancel an Agent-owned unfinished Chrome download.",
+    {download_id:z.number().int().nonnegative()},{title:"browser_agent_download_cancel",readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async({download_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_download_cancel",{download_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_prepare_download","Stage completed Agent download for approved destination origin via local file ticket.",
+    {download_id:z.number().int().nonnegative()},{title:"browser_agent_prepare_download",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async({download_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_prepare_download",{download_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_verify_receipt","Check current Agent-owned website UI for expected text; not server verification.",
+    {expected_text:z.string().min(3).max(160)},{title:"browser_agent_verify_receipt",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async({expected_text})=>{try{return companionOk(await callDesktopCompanion("browser_agent_verify_receipt",{expected_text}));}catch(error){return fail(error);}},
+  );
+  server.tool(
     "browser_agent_screenshot","Screenshot the Agent-created Chrome tab without switching to it; returns native image content.",
     {},{title:"Screenshot My User Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_screenshot"));}catch(error){return fail(error);}},
