@@ -41,6 +41,8 @@ const sensitiveKeys = new Set([
   "result",
   "manual_result",
   "control_token",
+  "token",
+  "handoff_token",
   "steps",
   "args",
 ]);

@@ -206,10 +206,10 @@ export function getActionContract(action: string, args: unknown = {}): ActionCon
       resources: [resource("browser.session", "shared")],
     };
   }
-  if (["browser.open", "browser.use_tab", "browser.new_tab", "browser.click", "browser.type", "browser.upload", "browser.close"].includes(action)) {
+  if (["browser.open", "browser.use_tab", "browser.new_tab", "browser.handoff_prepare", "browser.handoff_claim", "browser.click", "browser.type", "browser.upload", "browser.close"].includes(action)) {
     const externallyConsequential = ["browser.click", "browser.type", "browser.upload"].includes(action);
     return {
-      riskLevel: externallyConsequential ? "high" : "medium",
+      riskLevel: externallyConsequential || action.startsWith("browser.handoff_") ? "high" : "medium",
       idempotent: action === "browser.use_tab" || action === "browser.close",
       sideEffects: externallyConsequential ? ["web_interaction"] : ["browser_state"],
       retryPolicy: externallyConsequential ? "manual" : "automatic",

@@ -111,9 +111,67 @@ try {
   await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(latestBeta.index)),
     /assigned to another Runtime owner/);
 
-  const closed = await runAs("alpha", () => browserProvider.close());
+  // Explicit one-use handoff binds the secret to a named successor.
+  const handoff = await runAs("alpha", () =>
+    browserProvider.prepareTabHandoff("gamma", 120));
+  assert.equal(handoff.tabId, alpha.tabId);
+  assert.match(handoff.token, /^[a-f0-9]{64}$/);
+  await assert.rejects(
+    () => runAs("beta", () => browserProvider.claimTabHandoff(handoff.token)),
+    /BROWSER_HANDOFF_TARGET_MISMATCH/,
+  );
+  await assert.rejects(
+    () => runAs("gamma", () => browserProvider.claimTabHandoff("0".repeat(64))),
+    /BROWSER_HANDOFF_INVALID_OR_CONSUMED/,
+  );
+  const claimed = await runAs("gamma", () =>
+    browserProvider.claimTabHandoff(handoff.token));
+  assert.equal(claimed.tabId, alpha.tabId);
+  assert.equal(claimed.claimed, true);
+  await assert.rejects(
+    () => runAs("gamma", () => browserProvider.claimTabHandoff(handoff.token)),
+    /BROWSER_HANDOFF_INVALID_OR_CONSUMED/,
+  );
+  assert.equal((await runAs("gamma", () => browserProvider.snapshot())).title, "alpha");
+  await assert.rejects(
+    () => runAs("alpha", () => browserProvider.useTab(undefined, alpha.tabId)),
+    /assigned to another Runtime owner/,
+  );
+  // Any origin change invalidates the already-issued handoff.
+  const second = await runAs("gamma", () =>
+    browserProvider.prepareTabHandoff("delta", 120));
+  await runAs("gamma", () => browserProvider.open("about:blank"));
+  await assert.rejects(
+    () => runAs("delta", () => browserProvider.claimTabHandoff(second.token)),
+    /BROWSER_HANDOFF_TARGET_CHANGED/,
+  );
+  await runAs("gamma", () => browserProvider.open(url + "/alpha"));
+  const expired = await runAs("gamma", () =>
+    browserProvider.prepareTabHandoff("epsilon", 15));
+  const grants = (browserProvider as unknown as {
+    handoffGrants: Map<string, { expiresAt: number }>;
+  }).handoffGrants;
+  for (const grant of grants.values()) grant.expiresAt = Date.now() - 1;
+  await assert.rejects(
+    () => runAs("epsilon", () => browserProvider.claimTabHandoff(expired.token)),
+    /BROWSER_HANDOFF_EXPIRED/,
+  );
+  const afterClose = await runAs("gamma", () =>
+    browserProvider.prepareTabHandoff("epsilon", 15));
+  const { sanitizeAuditArgs } = await import("../src/audit.js");
+  const redacted = sanitizeAuditArgs({token: afterClose.token}) as {
+    token: { redacted: boolean; sha256: string };
+  };
+  assert.equal(redacted.token.redacted, true);
+  assert.equal(JSON.stringify(redacted).includes(afterClose.token), false);
+
+  const closed = await runAs("gamma", () => browserProvider.close());
   assert.equal(closed.scope, "owner");
   assert.equal(closed.tabClosed, true);
+  await assert.rejects(
+    () => runAs("epsilon", () => browserProvider.claimTabHandoff(afterClose.token)),
+    /BROWSER_HANDOFF_INVALID_OR_CONSUMED/,
+  );
   assert.equal((await runAs("beta", () => browserProvider.snapshot())).title, "beta");
   const visible = await browserProvider.snapshot();
   assert.ok(["human", "spare"].includes(visible.title));
@@ -121,5 +179,5 @@ try {
 } finally {
   await browserProvider.close().catch(() => undefined);
   await new Promise<void>(resolve => server.close(() => resolve()));
-  await fs.rm(scratch, {recursive: true, force: true});
+  await fs.rm(scratch, {recursive: true, force: true, maxRetries: 10, retryDelay: 150});
 }

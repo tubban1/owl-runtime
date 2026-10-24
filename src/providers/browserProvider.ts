@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   chromium,
   type Browser,
@@ -338,6 +338,10 @@ class BrowserProvider implements ComputerProvider {
   private ownedPages = new Map<string, Page>();
   private agentCreatedPages = new WeakSet<Page>();
   private tabIds = new WeakMap<Page, string>();
+  private handoffGrants = new Map<string, {
+    source: string; target: string; page: Page; tabId: string;
+    origin: string; expiresAt: number;
+  }>();
   private chromeProcess: ChildProcess | null = null;
   private cdpPort: number | null = null;
   private currentHeadless: boolean | null = null;
@@ -667,6 +671,7 @@ class BrowserProvider implements ComputerProvider {
     this.context = context;
     this.activePage = context.pages()[0] ?? (await context.newPage());
     this.ownedPages.clear();
+    this.handoffGrants.clear();
     this.chromeProcess = null;
     this.cdpPort = existing.port;
     this.currentHeadless = existing.headless;
@@ -678,6 +683,7 @@ class BrowserProvider implements ComputerProvider {
       this.context = null;
       this.activePage = null;
       this.ownedPages.clear();
+      this.handoffGrants.clear();
       this.chromeProcess = null;
       this.cdpPort = null;
       this.currentHeadless = null;
@@ -768,6 +774,7 @@ class BrowserProvider implements ComputerProvider {
       this.recoveredAfterRuntimeRestart = false;
       this.activePage = context.pages()[0] ?? (await context.newPage());
       this.ownedPages.clear();
+      this.handoffGrants.clear();
 
       browser.on("disconnected", () => {
         if (this.browser !== browser) return;
@@ -1439,11 +1446,82 @@ class BrowserProvider implements ComputerProvider {
     });
   }
 
+
+  // One-use, narrowly scoped recovery for a known successor. This is NOT
+  // permission to attach to arbitrary Chrome tabs or change web permissions.
+  async prepareTabHandoff(targetSessionId: string, ttlSeconds = 120) {
+    return await this.withBrowserActivity(async () => {
+      const source = this.currentTabOwner();
+      if (!source) throw new Error("BROWSER_HANDOFF_OWNER_REQUIRED");
+      const page = this.findOwnedPage(source);
+      if (!page) throw new Error("BROWSER_HANDOFF_NO_OWNED_TAB");
+      const target = "session:" + targetSessionId;
+      if (target === source) throw new Error("BROWSER_HANDOFF_SAME_OWNER");
+      const origin = new URL(page.url()).origin;
+      if (!["https:", "http:"].includes(new URL(page.url()).protocol)) {
+        throw new Error("BROWSER_HANDOFF_WEB_ORIGIN_REQUIRED");
+      }
+      // Only one outstanding grant for a source page; do not multiply access.
+      for (const [key, grant] of this.handoffGrants) {
+        if (grant.source === source) this.handoffGrants.delete(key);
+      }
+      const token = randomBytes(32).toString("hex");
+      const tokenHash = createHash("sha256").update(token).digest("hex");
+      const tabId = await this.tabId(page);
+      this.handoffGrants.set(tokenHash, {
+        source, target, page, tabId, origin,
+        expiresAt: Date.now() + ttlSeconds * 1_000,
+      });
+      return {
+        token, tabId, origin, targetSessionId,
+        expiresAt: new Date(Date.now() + ttlSeconds * 1_000).toISOString(),
+        warning: "Secret, one-use handoff token. Only deliver to the explicitly authorized successor.",
+      };
+    });
+  }
+
+  async claimTabHandoff(token: string) {
+    return await this.withBrowserActivity(async () => {
+      const target = this.currentTabOwner();
+      if (!target) throw new Error("BROWSER_HANDOFF_OWNER_REQUIRED");
+      const key = createHash("sha256").update(token).digest("hex");
+      const grant = this.handoffGrants.get(key);
+      if (!grant) throw new Error("BROWSER_HANDOFF_INVALID_OR_CONSUMED");
+      if (grant.expiresAt < Date.now()) {
+        this.handoffGrants.delete(key);
+        throw new Error("BROWSER_HANDOFF_EXPIRED");
+      }
+      if (grant.target !== target) throw new Error("BROWSER_HANDOFF_TARGET_MISMATCH");
+      if (grant.page.isClosed() || this.findOwnedPage(grant.source) !== grant.page) {
+        this.handoffGrants.delete(key);
+        throw new Error("BROWSER_HANDOFF_SOURCE_NOT_AVAILABLE");
+      }
+      if (new URL(grant.page.url()).origin !== grant.origin ||
+          await this.tabId(grant.page) !== grant.tabId) {
+        this.handoffGrants.delete(key);
+        throw new Error("BROWSER_HANDOFF_TARGET_CHANGED");
+      }
+      const currentlyOwned = this.findOwnedPage(target);
+      if (currentlyOwned) throw new Error("BROWSER_HANDOFF_TARGET_ALREADY_OWNS_TAB");
+      // Atomic move: no await between removing the source and adding target.
+      this.ownedPages.delete(grant.source);
+      this.ownedPages.set(target, grant.page);
+      this.handoffGrants.delete(key);
+      return {
+        claimed: true, tabId: grant.tabId, origin: grant.origin,
+        url: grant.page.url(), title: await grant.page.title(),
+      };
+    });
+  }
+
   async close() {
     const owner = this.currentTabOwner();
     if (owner) {
       const page = this.findOwnedPage(owner);
       this.ownedPages.delete(owner);
+      for (const [key, grant] of this.handoffGrants) {
+        if (grant.source === owner || grant.page === page) this.handoffGrants.delete(key);
+      }
       const tabClosed = Boolean(page && this.agentCreatedPages.has(page));
       // Never close an existing human-owned tab explicitly bound by use_tab.
       if (tabClosed && page) {
@@ -1468,6 +1546,7 @@ class BrowserProvider implements ComputerProvider {
     this.context = null;
     this.activePage = null;
     this.ownedPages.clear();
+    this.handoffGrants.clear();
     this.chromeProcess = null;
     this.cdpPort = null;
     this.currentHeadless = null;

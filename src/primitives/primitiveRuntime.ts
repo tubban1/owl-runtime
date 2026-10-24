@@ -359,18 +359,20 @@ const definitions: PrimitiveDefinition[] = [
   {
     id: "web.session",
     domain: "web",
-    description: "Inspect, switch, create, or close managed browser tabs/sessions.",
-    ops: ["tabs", "use_tab", "new_tab", "close"],
+    description: "Inspect and manage owner-isolated browser tabs with explicit, single-use session handoff.",
+    ops: ["tabs", "use_tab", "new_tab", "handoff_prepare", "handoff_claim", "close"],
     route: (op, args) => {
       const normalized = requireOp(
         op,
-        ["tabs", "use_tab", "new_tab", "close"],
+        ["tabs", "use_tab", "new_tab", "handoff_prepare", "handoff_claim", "close"],
         "web.session",
       );
       const action = {
         tabs: "browser.tabs",
         use_tab: "browser.use_tab",
         new_tab: "browser.new_tab",
+        handoff_prepare: "browser.handoff_prepare",
+        handoff_claim: "browser.handoff_claim",
         close: "browser.close",
       }[normalized]!;
       return { action, args };

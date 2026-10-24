@@ -472,6 +472,24 @@ const actions = {
     openWorld: true,
     run: ({ index, tab_id }: any) => browserProvider.useTab(index, tab_id),
   },
+  "browser.handoff_prepare": {
+    provider: "browser",
+    description: "Authorize one existing agent-owned Chrome tab for one named successor Runtime session for up to 3 minutes.",
+    schema: z.object({
+      target_session_id: z.string().min(3).max(256).regex(/^[a-zA-Z0-9:_-]+$/),
+      ttl_seconds: z.number().int().min(15).max(180).optional(),
+    }).strict(),
+    openWorld: true,
+    run: ({ target_session_id, ttl_seconds }: any) =>
+      browserProvider.prepareTabHandoff(target_session_id, ttl_seconds ?? 120),
+  },
+  "browser.handoff_claim": {
+    provider: "browser",
+    description: "Claim a previously approved, single-use tab handoff bound to exactly this Runtime session.",
+    schema: z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+    openWorld: true,
+    run: ({ token }: any) => browserProvider.claimTabHandoff(token),
+  },
   "browser.new_tab": {
     provider: "browser",
     description: "Create a new managed browser tab and optionally navigate it.",
