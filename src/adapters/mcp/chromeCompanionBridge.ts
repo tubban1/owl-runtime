@@ -24,6 +24,12 @@ const ALLOWED = new Set([
   "browser_agent_focus_login",
   "browser_agent_close_tab",
   "browser_agent_status",
+  "browser_agent_capabilities",
+  "browser_agent_file_inputs",
+  "browser_agent_prepare_file",
+  "browser_agent_upload_file",
+  "browser_agent_upload_status",
+  "browser_agent_release_file",
 ]);
 
 function endpoint(): URL {

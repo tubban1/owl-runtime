@@ -1490,6 +1490,49 @@ function createServer() {
     async({uid})=>{try{return companionOk(await callDesktopCompanion("browser_agent_click",{uid}));}catch(error){return fail(error);}},
   );
   server.tool(
+    "browser_agent_capabilities",
+    "Report browser and secure local-file upload capabilities. The user's local Host must explicitly configure upload roots and permitted destination websites.",
+    {},{title:"Browser Agent Capabilities",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_capabilities"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_file_inputs",
+    "Discover file upload inputs (including hidden input[type=file]) on the current Agent-owned signed-in Chrome tab without opening a system dialog.",
+    {},{title:"Find Browser Upload Fields",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_file_inputs"));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_prepare_file",
+    "Stage a local file only from Host-configured OWL_AGENT_UPLOAD_ROOTS and for a Host-configured OWL_AGENT_UPLOAD_ORIGINS site. Returns opaque short-lived file_ticket, no file bytes.",
+    {file_path:z.string().min(1).max(4096)},
+    {title:"Prepare Authorized Local File",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async({file_path})=>{try{return companionOk(await callDesktopCompanion("browser_agent_prepare_file",{file_path}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_upload_file",
+    "Attach 1–5 approved file tickets to a tab-owned HTML file input through tab-scoped debugger. No global 9222 or Finder dialog. Returns state=selected ONLY; verify website success separately.",
+    {page_id:z.number().int().nonnegative(),input_uid:z.string().min(1).max(100),
+     file_tickets:z.array(z.string().regex(/^[0-9a-f]{48}$/)).min(1).max(5)},
+    {title:"Attach File to Chrome Upload",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({page_id,input_uid,file_tickets})=>{try{return companionOk(await callDesktopCompanion(
+      "browser_agent_upload_file",{page_id,input_uid,file_tickets}
+    ));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_upload_status",
+    "Read the owner-bound local file-selection receipt, which is NOT proof the website has received the file.",
+    {upload_id:z.string().uuid()},
+    {title:"Check Browser Upload Selection",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({upload_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_upload_status",{upload_id}));}catch(error){return fail(error);}},
+  );
+  server.tool(
+    "browser_agent_release_file",
+    "Release temporary local staging file tickets after upload handling; never delete original files.",
+    {file_tickets:z.array(z.string().regex(/^[0-9a-f]{48}$/)).min(1).max(5)},
+    {title:"Release Prepared Browser Files",readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({file_tickets})=>{try{return companionOk(await callDesktopCompanion("browser_agent_release_file",{file_tickets}));}catch(error){return fail(error);}},
+  );
+  server.tool(
     "browser_agent_screenshot","Screenshot the Agent-created Chrome tab without switching to it; returns native image content.",
     {},{title:"Screenshot My User Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_screenshot"));}catch(error){return fail(error);}},
