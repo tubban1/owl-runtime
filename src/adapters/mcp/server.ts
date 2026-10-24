@@ -1377,8 +1377,8 @@ function createServer() {
 
   server.tool(
     "browser_use_tab",
-    "Switch the managed browser to a tab by index.",
-    { index: z.number().int().min(0) },
+    "Select a managed browser tab without foreground focus change. Prefer tab_id, which remains stable if the user reorders tabs.",
+    { index: z.number().int().min(0).optional(), tab_id: z.string().regex(/^[a-fA-F0-9]{32}$/).optional() },
     {
       title: "Browser Use Tab",
       readOnlyHint: false,
@@ -1386,9 +1386,9 @@ function createServer() {
       idempotentHint: true,
       openWorldHint: true,
     },
-    async ({ index }) => {
+    async ({ index, tab_id }) => {
       try {
-        return ok((await executeRoutedAction("browser.use_tab", { index })).result);
+        return ok((await executeRoutedAction("browser.use_tab", { index, tab_id })).result);
       } catch (error) {
         return fail(error);
       }

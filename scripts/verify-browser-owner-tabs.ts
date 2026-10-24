@@ -38,14 +38,21 @@ try {
   // A human-visible legacy page exists before the agent creates background tabs.
   const human = await browserProvider.open(url + "/human", "domcontentloaded", true);
   assert.equal(human.title, "human");
+  const spare = await browserProvider.newTab(url + "/spare");
+  assert.match(spare.tabId, /^[a-fA-F0-9]{32}$/);
 
   const alpha = await runAs("alpha", () => browserProvider.open(url + "/alpha"));
   const beta = await runAs("beta", () => browserProvider.open(url + "/beta"));
+  assert.match(alpha.tabId, /^[a-fA-F0-9]{32}$/);
+  assert.match(beta.tabId, /^[a-fA-F0-9]{32}$/);
+  assert.notEqual(alpha.tabId, beta.tabId);
   assert.equal(alpha.title, "alpha");
   assert.equal(beta.title, "beta");
 
-  await runAs("alpha", () => browserProvider.type("#note", "alpha-only"));
-  await runAs("beta", () => browserProvider.type("#note", "beta-only"));
+  const alphaType = await runAs("alpha", () => browserProvider.type("#note", "alpha-only"));
+  const betaType = await runAs("beta", () => browserProvider.type("#note", "beta-only"));
+  assert.equal(alphaType.tabId, alpha.tabId);
+  assert.equal(betaType.tabId, beta.tabId);
 
   const alphaInput = await runAs("alpha", () => browserProvider.controlState("#note"));
   const betaInput = await runAs("beta", () => browserProvider.controlState("#note"));
@@ -59,8 +66,10 @@ try {
 
   const alphaShot = path.join(scratch, "alpha.png");
   const betaShot = path.join(scratch, "beta.png");
-  await runAs("alpha", () => browserProvider.screenshot(alphaShot));
-  await runAs("beta", () => browserProvider.screenshot(betaShot));
+  const alphaEvidence = await runAs("alpha", () => browserProvider.screenshot(alphaShot));
+  const betaEvidence = await runAs("beta", () => browserProvider.screenshot(betaShot));
+  assert.equal(alphaEvidence.tabId, alpha.tabId);
+  assert.equal(betaEvidence.tabId, beta.tabId);
   assert.ok((await fs.stat(alphaShot)).size > 100);
   assert.ok((await fs.stat(betaShot)).size > 100);
 
@@ -76,14 +85,38 @@ try {
   const activeB = tabB.find(t => t.active);
   assert.ok(activeA && activeB);
   assert.notEqual(activeA.index, activeB.index);
-  await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(activeB.index)),
+  assert.equal(activeA.tabId, alpha.tabId);
+  assert.equal(activeB.tabId, beta.tabId);
+  // A human removes another tab. Stable IDs retain ownership and resolve to
+  // updated indices, while old indices no longer identify the same page.
+  const browserContext = (browserProvider as unknown as {
+    context: import("playwright-core").BrowserContext;
+  }).context;
+  const sparePage = browserContext.pages().find(p => p.url().endsWith("/spare"));
+  assert.ok(sparePage);
+  await sparePage.close();
+  const reordered = await runAs("alpha", () => browserProvider.listTabs());
+  const after = reordered.find(t => t.tabId === alpha.tabId);
+  assert.ok(after);
+  assert.notEqual(after.index, activeA.index);
+  const selected = await runAs("alpha", () => browserProvider.useTab(undefined, alpha.tabId));
+  assert.equal(selected.index, after.index);
+  assert.equal(selected.tabId, alpha.tabId);
+  await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(undefined, "f".repeat(32))),
+    /not found/);
+  await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(undefined, beta.tabId)),
+    /assigned to another Runtime owner/);
+  const latestBeta = reordered.find(t => t.tabId === beta.tabId);
+  assert.ok(latestBeta);
+  await assert.rejects(() => runAs("alpha", () => browserProvider.useTab(latestBeta.index)),
     /assigned to another Runtime owner/);
 
   const closed = await runAs("alpha", () => browserProvider.close());
   assert.equal(closed.scope, "owner");
   assert.equal(closed.tabClosed, true);
   assert.equal((await runAs("beta", () => browserProvider.snapshot())).title, "beta");
-  assert.equal((await browserProvider.snapshot()).title, "human");
+  const visible = await browserProvider.snapshot();
+  assert.ok(["human", "spare"].includes(visible.title));
   console.log(JSON.stringify({ok: true, sessions: 2, screenshots: 2, noCrossTabMutation: true, noGlobalBrowserClose: true}));
 } finally {
   await browserProvider.close().catch(() => undefined);

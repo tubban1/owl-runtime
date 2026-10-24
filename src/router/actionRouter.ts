@@ -462,10 +462,15 @@ const actions = {
   },
   "browser.use_tab": {
     provider: "browser",
-    description: "Switch browser tab.",
-    schema: z.object({ index: z.number().int().min(0) }),
+    description: "Select a managed browser tab without changing foreground focus. Prefer stable tab_id over index.",
+    schema: z.object({
+      index: z.number().int().min(0).optional(),
+      tab_id: z.string().regex(/^[a-fA-F0-9]{32}$/).optional(),
+    }).refine((v) => (v.index === undefined) !== (v.tab_id === undefined), {
+      message: "Exactly one of index or tab_id is required.",
+    }),
     openWorld: true,
-    run: ({ index }: any) => browserProvider.useTab(index),
+    run: ({ index, tab_id }: any) => browserProvider.useTab(index, tab_id),
   },
   "browser.new_tab": {
     provider: "browser",

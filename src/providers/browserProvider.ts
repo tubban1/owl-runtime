@@ -337,6 +337,7 @@ class BrowserProvider implements ComputerProvider {
   // An agent's logical tab must remain independent of Chrome's foreground tab.
   private ownedPages = new Map<string, Page>();
   private agentCreatedPages = new WeakSet<Page>();
+  private tabIds = new WeakMap<Page, string>();
   private chromeProcess: ChildProcess | null = null;
   private cdpPort: number | null = null;
   private currentHeadless: boolean | null = null;
@@ -1007,6 +1008,26 @@ class BrowserProvider implements ComputerProvider {
     }
   }
 
+  private async tabId(page: Page): Promise<string> {
+    const cached = this.tabIds.get(page);
+    if (cached && !page.isClosed()) return cached;
+    if (page.isClosed()) throw new Error("Browser tab has been closed.");
+    const session = await page.context().newCDPSession(page);
+    try {
+      // Chromium targetId is stable when a user reorders their tabs, and
+      // remains the same if OWL reconnects to the surviving Chrome process.
+      const { targetInfo } = await session.send("Target.getTargetInfo");
+      const id = String(targetInfo.targetId);
+      if (!/^[a-fA-F0-9]{32}$/.test(id)) {
+        throw new Error("Chromium returned an invalid browser tab ID.");
+      }
+      this.tabIds.set(page, id);
+      return id;
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  }
+
   private async page(): Promise<Page> {
     const context = await this.ensureContext();
     const owner = this.currentTabOwner();
@@ -1035,7 +1056,7 @@ class BrowserProvider implements ComputerProvider {
       await withBrowserCancellation(page, async () => {
         await page.goto(url, { waitUntil, timeout: 60_000 });
       });
-      return { url: page.url(), title: await page.title() };
+      return { tabId: await this.tabId(page), url: page.url(), title: await page.title() };
     });
   }
 
@@ -1047,6 +1068,7 @@ class BrowserProvider implements ComputerProvider {
       return await Promise.all(
         context.pages().map(async (page, index) => ({
           index,
+          tabId: await this.tabId(page),
           active: page === (owner ? scoped : this.activePage),
           url: page.url(),
           title: await page.title().catch(() => ""),
@@ -1055,14 +1077,23 @@ class BrowserProvider implements ComputerProvider {
     });
   }
 
-  async useTab(index: number) {
+  async useTab(index?: number, stableTabId?: string) {
     return await this.withBrowserActivity(async () => {
       const context = await this.ensureContext();
       const pages = context.pages();
-      if (!Number.isInteger(index) || index < 0 || index >= pages.length) {
-        throw new Error("Invalid browser tab index.");
+      if ((index === undefined) === (stableTabId === undefined)) {
+        throw new Error("Specify exactly one browser tab index or stable tab ID.");
       }
-      const page = pages[index];
+      let resolvedIndex = index;
+      if (stableTabId !== undefined) {
+        // Never silently fall back to an index or URL if a stable ID is stale.
+        const tabs = await Promise.all(pages.map(async (page) => await this.tabId(page)));
+        resolvedIndex = tabs.indexOf(stableTabId);
+      }
+      if (!Number.isInteger(resolvedIndex) || resolvedIndex! < 0 || resolvedIndex! >= pages.length) {
+        throw new Error("Browser tab was not found (closed or stale ID/index).");
+      }
+      const page = pages[resolvedIndex!];
       const owner = this.currentTabOwner();
       if (owner) {
         for (const [otherOwner, otherPage] of this.ownedPages) {
@@ -1075,7 +1106,7 @@ class BrowserProvider implements ComputerProvider {
         this.activePage = page;
       }
       // Logical selection does not activate the tab in the user's Chrome UI.
-      return { index, url: page.url(), title: await page.title() };
+      return { index: resolvedIndex!, tabId: await this.tabId(page), url: page.url(), title: await page.title() };
     });
   }
 
@@ -1097,6 +1128,7 @@ class BrowserProvider implements ComputerProvider {
       const pages = context.pages();
       return {
         index: pages.indexOf(page),
+        tabId: await this.tabId(page),
         url: page.url(),
         title: await page.title().catch(() => ""),
       };
@@ -1229,7 +1261,7 @@ class BrowserProvider implements ComputerProvider {
       await withBrowserCancellation(page, async () => {
         await locator.click({ timeout: 30_000 });
       });
-      return { url: page.url(), title: await page.title(), selector };
+      return { tabId: await this.tabId(page), url: page.url(), title: await page.title(), selector };
     });
   }
 
@@ -1242,6 +1274,7 @@ class BrowserProvider implements ComputerProvider {
         if (submit) await locator.press("Enter");
       });
       return {
+        tabId: await this.tabId(page),
         url: page.url(),
         title: await page.title(),
         selector,
@@ -1402,7 +1435,7 @@ class BrowserProvider implements ComputerProvider {
       const safePath = await assertAllowedTargetPath(outputPath);
       await fs.mkdir(path.dirname(safePath), { recursive: true });
       await page.screenshot({ path: safePath, fullPage });
-      return { path: safePath, url: page.url(), fullPage };
+      return { path: safePath, url: page.url(), tabId: await this.tabId(page), fullPage };
     });
   }
 

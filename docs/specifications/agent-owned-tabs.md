@@ -4,12 +4,12 @@ OWL Runtime's managed Chrome browser assigns a separate Playwright Page to each 
 
 ## Safety and behavior
 
-- `web.session(tabs)` reports `active` relative to the calling owner, not whichever tab the human is currently viewing.
+- `web.session(tabs)` reports `active` relative to the calling owner, not whichever tab the human is currently viewing. Tabs now expose the Chromium `tabId`, stable across tab reordering. Prefer `use_tab({tab_id})` over an index. A tab ID is never an authorization token.
 - An owner cannot claim a page already assigned to another live owner.
 - `web.session(close)` under an agent owner closes only an OWL-created tab assigned to that owner. A manually adopted user tab is not forcibly closed. Unscoped (system) close keeps its previous whole-browser behavior.
 - Managed browser headless/visible mode changes fail closed while owner tabs are active, avoiding accidental global restarts.
 - The managed Chrome profile stays separate from personal Chrome. Browser cookies/passwords are never copied silently.
-- Runtime Request/Task execution contexts supply ownership; the `runtime:system`/direct-browser contract keeps legacy behavior. A new session may need to explicitly re-bind a tab after a transport identity changes.
+- Runtime Request/Task execution contexts supply ownership; the `runtime:system`/direct-browser contract keeps legacy behavior. The stable tab ID remains valid across a Chrome CDP reconnect, but a different Runtime owner cannot claim the tab merely by knowing its ID. Secure identity handoff across transport rotation remains separate follow-up work.
 - This is a P0 isolation improvement, **not** permission to post, change account settings, make purchases, or perform destructive remote actions without the normal Runtime authorization and verification.
 
 ## Verification
