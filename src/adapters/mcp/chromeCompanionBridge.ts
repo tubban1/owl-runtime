@@ -10,6 +10,10 @@ const ALLOWED = new Set([
   "browser_companion_click",
   "browser_companion_action_result",
   "browser_companion_screenshot",
+  "browser_companion_open",
+  "browser_companion_agent_tabs",
+  "browser_companion_use_agent_tab",
+  "browser_companion_close_agent_tab",
 ]);
 
 function endpoint(): URL {

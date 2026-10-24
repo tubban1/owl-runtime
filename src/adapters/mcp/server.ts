@@ -1342,6 +1342,49 @@ function createServer() {
       catch (error) { return fail(error); }
     },
   );
+  // Only agent-created pages at a user-approved Chrome website; never
+  // forward arbitrary tabs, remote URLs or raw JavaScript into Chrome.
+  server.tool(
+    "browser_companion_open",
+    "Open an OWL-owned background tab in the user's signed-in Chrome, only on a website for which the user explicitly granted Chrome Companion site automation. No foreground focus change. If login is required, ask the user to click '接管登录 Agent 标签页' in the Companion popup.",
+    {url:z.string().url().max(2048)},
+    {title:"Open OWL Chrome Background Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async({url})=>{
+      try{return companionOk(await callDesktopCompanion("browser_companion_open",{url}));}
+      catch(error){return fail(error);}
+    },
+  );
+  server.tool(
+    "browser_companion_agent_tabs",
+    "List only tabs created by OWL in the user's Chrome; will not enumerate or select unrelated human tabs.",
+    {},
+    {title:"List OWL Chrome Tabs",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{
+      try{return companionOk(await callDesktopCompanion("browser_companion_agent_tabs"));}
+      catch(error){return fail(error);}
+    },
+  );
+  server.tool(
+    "browser_companion_use_agent_tab",
+    "Select a previously returned OWL-owned tabId logically, without bringing it to the foreground. User-owned tabs cannot be selected.",
+    {tab_id:z.number().int().nonnegative()},
+    {title:"Select OWL Chrome Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async({tab_id})=>{
+      try{return companionOk(await callDesktopCompanion("browser_companion_use_agent_tab",{tab_id}));}
+      catch(error){return fail(error);}
+    },
+  );
+  server.tool(
+    "browser_companion_close_agent_tab",
+    "Close only one of OWL's own Chrome tabs, never the user's existing tabs or another Session's tabs.",
+    {tab_id:z.number().int().nonnegative()},
+    {title:"Close OWL Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+    async({tab_id})=>{
+      try{return companionOk(await callDesktopCompanion("browser_companion_close_agent_tab",{tab_id}));}
+      catch(error){return fail(error);}
+    },
+  );
+
   server.tool(
     "browser_companion_status",
     "Read whether the user-consented Chrome Companion is paired to this OWL session. A different OWL session cannot reuse the browser authorization.",

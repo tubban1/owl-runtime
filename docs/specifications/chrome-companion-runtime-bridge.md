@@ -27,3 +27,11 @@ OWL Runtime and OWL Desktop expose separate MCP catalogs. The Chrome Companion t
 6. For independent screenshot evidence, the person must start Chrome's authorized tab capture before `browser_companion_screenshot`.
 
 Use `npx tsx scripts/verify-chrome-companion-mcp-bridge.ts` for owner/allowlist/SSRF guard regression, and an isolated MCP server + local Desktop MCP for a real tool-list/status E2E check.
+
+## Agent-owned background tabs (explicit website scope)
+
+After the user clicks **允许 Agent 操作此网站** in Chrome Companion and grants Chrome's optional host permission for that origin, Runtime MCP can call `browser_companion_open({url})`, `browser_companion_agent_tabs`, `browser_companion_use_agent_tab({tab_id})`, and `browser_companion_close_agent_tab({tab_id})`. These tools forward exclusively to the already-paired local Desktop MCP and retain its named Session authorization.
+
+Agent-created tabs use `chrome.tabs.create({active:false})` in the user's existing Chrome profile and therefore reuse existing signed-in website cookies *inside Chrome*, without exporting cookies. The agent may create, select and close only its own background tabs on the approved origin. It cannot manipulate a user's other tabs. If redirected to an unapproved SSO origin it must stop; the user may explicitly bring the agent tab to the foreground to complete login and hand control back.
+
+Automatic screenshots without a human capture gesture continue to use the OWL-managed Playwright browser. Signed-in personal Chrome screenshots still require user-initiated tabCapture. Ordinary page changes retain Runtime/Companion authorization and verification requirements; save/submit clicks require a separate confirmation.
