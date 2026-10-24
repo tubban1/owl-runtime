@@ -30,6 +30,12 @@ const ALLOWED = new Set([
   "browser_agent_upload_file",
   "browser_agent_upload_status",
   "browser_agent_release_file",
+  "browser_agent_download_file",
+  "browser_agent_download_status",
+  "browser_agent_download_list",
+  "browser_agent_download_cancel",
+  "browser_agent_prepare_download",
+  "browser_agent_verify_receipt",
 ]);
 
 function endpoint(): URL {
