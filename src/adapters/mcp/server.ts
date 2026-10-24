@@ -1417,7 +1417,7 @@ function createServer() {
   );
   server.tool(
     "browser_companion_click",
-    "Queue a click on a user-authorized tab. Returns a pending request ID immediately; user must approve the exact click in the extension. Check browser_companion_action_result before claiming completion.",
+    "Request a click on the selected authorized Chrome tab. In Agent-owned tabs, safe same-origin navigation links click automatically; Save/Submit/buttons/cross-site effects require explicit human approval. Returns a pending requestId; check browser_companion_action_result before claiming success, and request human approval only if still pending.",
     { selector:z.string().min(1).max(320) },
     { title:"Request Chrome Click Approval", readOnlyHint:false, destructiveHint:true, idempotentHint:false, openWorldHint:true },
     async ({selector}) => {
