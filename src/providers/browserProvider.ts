@@ -1,4 +1,5 @@
 import { runtimeStatePath } from "../runtime/runtimePaths.js";
+import { currentExecutionContext, executionOwnerKey } from "../runtime/executionContext.js";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -333,6 +334,9 @@ class BrowserProvider implements ComputerProvider {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private activePage: Page | null = null;
+  // An agent's logical tab must remain independent of Chrome's foreground tab.
+  private ownedPages = new Map<string, Page>();
+  private agentCreatedPages = new WeakSet<Page>();
   private chromeProcess: ChildProcess | null = null;
   private cdpPort: number | null = null;
   private currentHeadless: boolean | null = null;
@@ -364,6 +368,8 @@ class BrowserProvider implements ComputerProvider {
       details: {
         executable,
         connected: Boolean(this.context),
+        isolatedAgentTabs: true,
+        ownedTabCount: [...this.ownedPages.values()].filter((page) => !page.isClosed()).length,
         headless: this.currentHeadless ?? envFlag("BROWSER_HEADLESS", false),
         cdpPort: this.cdpPort,
         processArch: process.arch,
@@ -659,6 +665,7 @@ class BrowserProvider implements ComputerProvider {
     this.browser = browser;
     this.context = context;
     this.activePage = context.pages()[0] ?? (await context.newPage());
+    this.ownedPages.clear();
     this.chromeProcess = null;
     this.cdpPort = existing.port;
     this.currentHeadless = existing.headless;
@@ -669,6 +676,7 @@ class BrowserProvider implements ComputerProvider {
       this.browser = null;
       this.context = null;
       this.activePage = null;
+      this.ownedPages.clear();
       this.chromeProcess = null;
       this.cdpPort = null;
       this.currentHeadless = null;
@@ -758,6 +766,7 @@ class BrowserProvider implements ComputerProvider {
       this.currentHeadless = headless;
       this.recoveredAfterRuntimeRestart = false;
       this.activePage = context.pages()[0] ?? (await context.newPage());
+      this.ownedPages.clear();
 
       browser.on("disconnected", () => {
         if (this.browser !== browser) return;
@@ -905,6 +914,9 @@ class BrowserProvider implements ComputerProvider {
       this.currentHeadless !== null &&
       this.currentHeadless !== headlessOverride
     ) {
+      if (this.currentTabOwner() || [...this.ownedPages.values()].some((page) => !page.isClosed())) {
+        throw new Error("Cannot change managed browser headless mode while agent-owned tabs are active.");
+      }
       await this.close();
       throwIfCancelled(callerSignal);
     }
@@ -919,6 +931,9 @@ class BrowserProvider implements ComputerProvider {
           this.currentHeadless === headlessOverride
         ) {
           return context;
+        }
+        if (this.currentTabOwner() || [...this.ownedPages.values()].some((page) => !page.isClosed())) {
+          throw new Error("Cannot change managed browser headless mode while agent-owned tabs are active.");
         }
         await this.close();
         throwIfCancelled(callerSignal);
@@ -949,8 +964,59 @@ class BrowserProvider implements ComputerProvider {
     return await this.awaitSharedLaunch(trackedLaunch, callerSignal);
   }
 
+  private currentTabOwner(): string | null {
+    const execution = currentExecutionContext();
+    // Legacy direct calls and browser verifiers operate without an owner.
+    return execution.sessionId === "runtime:system"
+      ? null
+      : executionOwnerKey(execution);
+  }
+
+  private findOwnedPage(owner: string): Page | null {
+    const page = this.ownedPages.get(owner);
+    if (!page || page.isClosed()) {
+      this.ownedPages.delete(owner);
+      return null;
+    }
+    return page;
+  }
+
+  private async createBackgroundPage(context: BrowserContext): Promise<Page> {
+    // Playwright context.newPage() steals focus. CDP can create an actual
+    // background tab without selecting it in the user's Chrome window.
+    const browser = this.browser;
+    if (!browser) throw new Error("Managed browser CDP connection is unavailable.");
+    const previous = new Set(context.pages());
+    const waiter = context.waitForEvent("page", {
+      timeout: 10_000,
+      predicate: (page) => !previous.has(page),
+    });
+    // Consume possible waiter rejection if Target.createTarget fails.
+    void waiter.catch(() => undefined);
+    const session = await browser.newBrowserCDPSession();
+    try {
+      await session.send("Target.createTarget", {
+        url: "about:blank",
+        background: true,
+      });
+      const page = await waiter;
+      this.agentCreatedPages.add(page);
+      return page;
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  }
+
   private async page(): Promise<Page> {
     const context = await this.ensureContext();
+    const owner = this.currentTabOwner();
+    if (owner) {
+      const pinned = this.findOwnedPage(owner);
+      if (pinned) return pinned;
+      const created = await this.createBackgroundPage(context);
+      this.ownedPages.set(owner, created);
+      return created;
+    }
     if (this.activePage && !this.activePage.isClosed()) return this.activePage;
     this.activePage = context.pages()[0] ?? (await context.newPage());
     return this.activePage;
@@ -976,10 +1042,12 @@ class BrowserProvider implements ComputerProvider {
   async listTabs() {
     return await this.withBrowserActivity(async () => {
       const context = await this.ensureContext();
+      const owner = this.currentTabOwner();
+      const scoped = owner ? this.findOwnedPage(owner) : null;
       return await Promise.all(
         context.pages().map(async (page, index) => ({
           index,
-          active: page === this.activePage,
+          active: page === (owner ? scoped : this.activePage),
           url: page.url(),
           title: await page.title().catch(() => ""),
         })),
@@ -994,13 +1062,20 @@ class BrowserProvider implements ComputerProvider {
       if (!Number.isInteger(index) || index < 0 || index >= pages.length) {
         throw new Error("Invalid browser tab index.");
       }
-      this.activePage = pages[index];
-      await this.activePage.bringToFront();
-      return {
-        index,
-        url: this.activePage.url(),
-        title: await this.activePage.title(),
-      };
+      const page = pages[index];
+      const owner = this.currentTabOwner();
+      if (owner) {
+        for (const [otherOwner, otherPage] of this.ownedPages) {
+          if (otherOwner !== owner && otherPage === page && !page.isClosed()) {
+            throw new Error("Browser tab is already assigned to another Runtime owner.");
+          }
+        }
+        this.ownedPages.set(owner, page);
+      } else {
+        this.activePage = page;
+      }
+      // Logical selection does not activate the tab in the user's Chrome UI.
+      return { index, url: page.url(), title: await page.title() };
     });
   }
 
@@ -1010,8 +1085,10 @@ class BrowserProvider implements ComputerProvider {
   ) {
     return await this.withBrowserActivity(async () => {
       const context = await this.ensureContext();
-      const page = await context.newPage();
-      this.activePage = page;
+      const owner = this.currentTabOwner();
+      const page = owner ? await this.createBackgroundPage(context) : await context.newPage();
+      if (owner) this.ownedPages.set(owner, page);
+      else this.activePage = page;
       if (url) {
         await withBrowserCancellation(page, async () => {
           await page.goto(url, { waitUntil, timeout: 60_000 });
@@ -1330,6 +1407,18 @@ class BrowserProvider implements ComputerProvider {
   }
 
   async close() {
+    const owner = this.currentTabOwner();
+    if (owner) {
+      const page = this.findOwnedPage(owner);
+      this.ownedPages.delete(owner);
+      const tabClosed = Boolean(page && this.agentCreatedPages.has(page));
+      // Never close an existing human-owned tab explicitly bound by use_tab.
+      if (tabClosed && page) {
+        await page.close({ runBeforeUnload: false });
+        this.agentCreatedPages.delete(page);
+      }
+      return { closed: true, scope: "owner", tabClosed };
+    }
     this.clearRestartSurvivorReaper();
     this.clearIdleFreezeTimer();
     const launch = this.launchPromise;
@@ -1345,6 +1434,7 @@ class BrowserProvider implements ComputerProvider {
     this.browser = null;
     this.context = null;
     this.activePage = null;
+    this.ownedPages.clear();
     this.chromeProcess = null;
     this.cdpPort = null;
     this.currentHeadless = null;
