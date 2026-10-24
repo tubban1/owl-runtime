@@ -1,28 +1,23 @@
-# OWL User Chrome (default Agent Browser)
+# OWL User Chrome Agent Browser — Default Native Messaging
 
-The default browser backend is the user's **already running normal Chrome**, not an isolated headless Chromium profile. It uses Google's official Chrome DevTools MCP `--autoConnect` API with one long-lived MCP child process per OWL Connection Host. It does not use Chrome Companion pairing, site-by-site permissions, or user-data-dir copies.
+For user Chrome work, call `browser_agent_open` and the other `browser_agent_*` tools. These target OWL-owned **background tabs in the user's already-signed-in Chrome**.
 
-## First connection
+The Desktop Host now connects through the explicitly installed **OWL LAB Agent Browser Chrome extension + Native Messaging**. This is not OWL's headless Chromium and **does not require enabling Chrome's remote-debugging switch or TCP/9222**. Chrome Companion's 16-character pairing flow is not required.
 
-1. Chrome **144 or newer** must be running on the host. In the user's own Chrome, visit `chrome://inspect/#remote-debugging` and enable Chrome's remote debugging feature.
-2. Call `browser_agent_open({url:"https://www.reddit.com/settings/profile"})`. Chrome prompts the user to approve a debugging connection. The user clicks **Allow**. **This is mandatory browser security consent**, not a per-page authorization.
-3. The Host retains its Chrome DevTools MCP connection across ChatGPT Agent Sessions. Additional OWL Sessions do not reconnect to Chrome or require new pairing codes. A Host restart or Chrome disconnect may trigger another Chrome permission dialog.
-4. OWL opens its tabs with `new_page({url,background:true})` in the **existing Chrome profile**, reusing existing login cookies and extensions naturally within Chrome, with no cookie export.
-5. Agent uses `browser_agent_snapshot`, `browser_agent_fill({uid,value})`, `browser_agent_click({uid})`, `browser_agent_screenshot`, `browser_agent_tabs`, `browser_agent_use_tab({page_id})`, and `browser_agent_close_tab({page_id})`. UIDs must come from a fresh accessibility snapshot. Each Session sees and controls only its own new tabs; no human tab IDs or other Session tabs are disclosed.
-6. When Reddit asks for human verification, call `browser_agent_focus_login`. Only **that Agent-owned tab** comes forward. The user completes login/CAPTCHA/2FA in Chrome and says to continue; the Agent uses the same pageId afterward. No need to close other Agents' tabs or change any global headless setting.
+## One-time Chrome setup
 
-`browser_open` remains **opt-in isolated Chromium** only, for separate profiles, headless tasks, or test isolation. Do not automatically fall back to it on a Chrome native connection error, because that breaks login reuse.
+The user installs the `chrome-agent-native` extension, reviews Chrome's permissions (site access, Native Messaging and tab-specific debugger screenshots), registers its exact ID with the local OWL native host installer, and reloads the extension. An enabled OWL Connection Host is required. See `owl-desktop/docs/operations/CHROME_NATIVE_MESSAGING.md`.
 
-## Security and tradeoffs
+## Agent flow
 
-- Chrome's official remote-debugging permission is more powerful than an individual extension host grant. Chrome displays an automation banner while connected. The OWL bridge restricts exposed commands to Agent-created tab IDs; this is not equivalent to sandboxing the underlying privileged MCP child process. Only connect a trusted local OWL installation, and disable Chrome remote debugging when not wanted.
-- Chrome DevTools MCP currently needs a consent prompt on each **connection**, not on each **tab**. OWL avoids per-Agent prompts by maintaining one long-lived child process. The user can deny the dialog to prevent access.
-- Passwords, one-time codes, CVV and token-like controls are blocked from Agent fill. Destructive/account-security/purchase operations are not automatically clicked; Runtime and user intent remain the authority for consequences.
-- This mode intentionally reuses the selected Chrome profile's existing authentication and may face fewer login barriers than headless automation; it **does not** bypass CAPTCHA or guarantee that Reddit never challenges the user.
-- MCP Browser result snapshots and images sent to the invoking ChatGPT session may traverse OWL Cloud/Tunnel and should be treated as session data.
-- Chrome DevTools MCP installed via pinned `chrome-devtools-mcp@1.11.0 --autoConnect`. Optional `OWL_CHROME_DEVTOOLS_MCP_CLI` can point to a preinstalled local CLI entrypoint (without downloading code at runtime).
-- The Chrome DevTools native bridge does not require the Chrome Companion extension. The older Companion remains available as an alternative with narrower per-site permission, if the user prefers not enabling whole-browser debugging.
+1. `browser_agent_status` checks connected extension/Host status. If unavailable, report this, rather than falling back to a separate headless browser without consent.
+2. `browser_agent_open({url})` creates one background tab in the existing Chrome profile; saved Chrome logins are reused without extracting cookies.
+3. `browser_agent_tabs` and `browser_agent_use_tab({page_id})` operate only on tabs created for the current stable OWL Session; user and other Agent tabs remain isolated.
+4. `browser_agent_snapshot` returns current page text and controls; `browser_agent_fill({uid,value})` fills nonsensitive text fields; `browser_agent_click({uid})` automatically navigates safe same-origin links only. Ambiguous submissions, account changes and destructive/payment actions stay manual in this pilot.
+5. `browser_agent_screenshot` uses a brief Chrome extension debugger attachment for the Agent's own tab, never a global remote-debugging server.
+6. If the page needs login/CAPTCHA/2FA, `browser_agent_focus_login` brings the Agent's own tab to the front for the human. The Agent resumes the same tab afterward.
+7. `browser_agent_close_tab({page_id})` closes only an Agent-owned tab.
 
-## Verification
+The optional `browser_open` continues to use the isolated Playwright profile with separate login state. `OWL_CHROME_BACKEND=devtools` is an explicit developer fallback if Chrome DevTools MCP is intentionally desired.
 
-Unit tests use a fake persistent Chrome DevTools MCP connection to prove `new_page.background===true`, shared connection across Sessions, strict page ownership, human tab not exposed, non-credential fill, background screenshot, and explicit focus-for-login. Real existing-profile E2E requires the user's Chrome remote-debugging toggle and one user-approved Chrome consent; do not claim this acceptance until it has actually happened.
+The Chrome extension requests broad host/debugger permissions at installation. This is a meaningful trust decision. Users may revoke access from Chrome settings. It does not eliminate the user's need to review security-sensitive actions. Changes must be validated on a real installed Chrome profile before calling this a finished production workflow.

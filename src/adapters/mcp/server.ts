@@ -1451,7 +1451,7 @@ function createServer() {
   // Every tool is filtered to a tab that this stable OWL owner created.
   server.tool(
     "browser_agent_open",
-    "DEFAULT: create a background tab in the user's existing normal Google Chrome with signed-in profile, NOT OWL's separate headless browser. Chrome 144+ must first allow remote debugging at chrome://inspect/#remote-debugging, with one Chrome confirmation per Host connection. No Chrome Companion pairing or per-tab grant.",
+    "DEFAULT: create a background tab in the user's existing normal Google Chrome with signed-in profile, NOT OWL's separate headless browser. Use the OWL LAB Agent Browser extension with one-time Chrome extension permission and installed Native Messaging host; do NOT ask for chrome://inspect remote debugging or a Companion pairing code for this default mode. Only Agent-created tabs may be accessed.",
     {url:z.string().url(),headless:z.boolean().optional()},
     {title:"Open Agent Tab in My Chrome",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     async({url,headless})=>{
@@ -1506,7 +1506,7 @@ function createServer() {
     async({page_id})=>{try{return companionOk(await callDesktopCompanion("browser_agent_close_tab",{page_id}));}catch(error){return fail(error);}},
   );
   server.tool(
-    "browser_agent_status","Check persistent Chrome DevTools MCP Host connection status and readiness.",
+    "browser_agent_status","Check OWL Chrome Native Messaging extension and local Connection Host readiness. It does not require browser remote debugging; DevTools is an explicit legacy fallback.",
     {},{title:"Chrome Agent Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     async()=>{try{return companionOk(await callDesktopCompanion("browser_agent_status"));}catch(error){return fail(error);}},
   );
