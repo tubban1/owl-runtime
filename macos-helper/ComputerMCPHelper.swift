@@ -518,10 +518,30 @@ func writeResponse(fd: Int32, object: Any) {
 }
 
 func serve(socketPath: String) throws -> Never {
-    let listener = try makeUnixListener(path: socketPath)
+    // Take an OS-level, nonblocking lock BEFORE unlinking the Unix socket.
+    // Previously simultaneous --serve processes could all unlink/rebind the
+    // same path, orphaning the original listener and spawning helper storms.
+    // Keep this separate lock file: removing it would split the lock inode.
+    try ensureSocketDirectory(socketPath)
+    let lockFd = open(socketPath + ".lock", O_CREAT | O_RDWR | O_NOFOLLOW, mode_t(0o600))
+    if lockFd < 0 {
+        throw HelperError(message: "Could not open helper single-instance lock.")
+    }
+    if flock(lockFd, LOCK_EX | LOCK_NB) != 0 {
+        close(lockFd)
+        throw HelperError(message: "Helper already serves this socket path.")
+    }
+    let listener: Int32
+    do {
+        listener = try makeUnixListener(path: socketPath)
+    } catch {
+        close(lockFd)
+        throw error
+    }
     defer {
         close(listener)
         unlink(socketPath)
+        close(lockFd)
     }
 
     signal(SIGPIPE, SIG_IGN)

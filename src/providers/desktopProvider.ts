@@ -259,6 +259,27 @@ async function sendHelperRequestOnce(
   });
 }
 
+// Coalesce parallel status, screen and UI requests when the Helper is cold.
+let helperLaunchInFlight: Promise<void> | null = null;
+
+async function ensureHelperLaunch(): Promise<void> {
+  if (helperLaunchInFlight) return await helperLaunchInFlight;
+  const task = (async () => {
+    if (await socketExists()) {
+      // A slow handshake means busy, not dead: never unlink a live listener.
+      await sendHelperRequestOnce("status", {}, 1_500);
+      return;
+    }
+    await launchHelper();
+  })();
+  helperLaunchInFlight = task;
+  try {
+    await task;
+  } finally {
+    if (helperLaunchInFlight === task) helperLaunchInFlight = null;
+  }
+}
+
 async function helperRequest(
   action: string,
   args: Record<string, unknown> = {},
@@ -276,7 +297,7 @@ async function helperRequest(
     if (!autoLaunch) {
       throw new Error("OWL LAB Helper is not running.");
     }
-    await launchHelper();
+    await ensureHelperLaunch();
   }
 
   try {
@@ -288,16 +309,27 @@ async function helperRequest(
       error && typeof error === "object" && "code" in error
         ? String((error as NodeJS.ErrnoException).code ?? "")
         : "";
-    const message = error instanceof Error ? error.message : String(error);
-    const transportFailure =
-      ["ECONNREFUSED", "ENOENT", "ECONNRESET", "EPIPE"].includes(code) ||
-      message.includes("timed out during");
+    // Only connection refusal or a missing socket proves that this request
+    // did NOT execute. ECONNRESET, EPIPE and timeouts may occur AFTER a
+    // consequential click or keystroke; retrying would duplicate effects.
+    if (!["ECONNREFUSED", "ENOENT"].includes(code)) throw error;
 
-    if (!transportFailure) throw error;
-
-    // A crashed helper can leave a stale Unix socket behind.
+    // Re-check the listener before replacing a demonstrably stale socket.
+    try {
+      await sendHelperRequestOnce("status", {}, 1_500);
+      return await sendHelperRequestOnce(action, args, timeoutMs);
+    } catch (probeError) {
+      const probeCode = probeError && typeof probeError === "object" && "code" in probeError
+        ? String((probeError as NodeJS.ErrnoException).code ?? "")
+        : "";
+      if (!["ECONNREFUSED", "ENOENT"].includes(probeCode)) {
+        throw error;
+      }
+    }
+    // Only a refused/missing socket is demonstrably stale. Coalesce
+    // recovery across concurrent calls; Swift also enforces one server.
     await fs.rm(helperSocketPath(), { force: true }).catch(() => undefined);
-    await launchHelper();
+    await ensureHelperLaunch();
     return await sendHelperRequestOnce(action, args, timeoutMs);
   }
 }
@@ -314,6 +346,15 @@ async function helperOrFallback<T>(
       return (await helperRequest(action, args, { timeoutMs })) as T;
     } catch (error) {
       if (mode === "required") throw error;
+      // A timeout or reset does not prove a GUI action failed to execute.
+      // Falling back to JXA can duplicate clicks, typing, or other effects.
+      const code = error && typeof error === "object" && "code" in error
+        ? String((error as NodeJS.ErrnoException).code ?? "") : "";
+      const message = error instanceof Error ? error.message : String(error);
+      const definitelyUnavailable = ["ENOENT", "ECONNREFUSED"].includes(code) ||
+        message.includes("Helper is not installed") ||
+        message.includes("Helper did not create its Unix socket");
+      if (!definitelyUnavailable) throw error;
     }
   }
   return await fallback();

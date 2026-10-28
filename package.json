@@ -103,7 +103,8 @@
     "verify:publish-m7": "OWL_RUNTIME_MODE=test tsx scripts/verify-publish-official-m7.ts",
     "verify:publish-media-m8": "OWL_RUNTIME_MODE=test tsx scripts/verify-publish-media-m8.ts",
     "verify:publish-m9": "OWL_RUNTIME_MODE=test tsx scripts/verify-publish-https-m9.ts && OWL_RUNTIME_MODE=test tsx scripts/verify-publish-resume-m9.ts",
-    "verify:git-push-default": "OWL_RUNTIME_MODE=test tsx scripts/verify-git-push-default.ts"
+    "verify:git-push-default": "OWL_RUNTIME_MODE=test tsx scripts/verify-git-push-default.ts",
+    "verify:macos-helper-single-instance": "node scripts/verify-macos-helper-single-instance.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
