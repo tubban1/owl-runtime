@@ -144,9 +144,33 @@ cat > "$PLIST" <<EOF
 EOF
 chmod 600 "$PLIST"
 
+source "$SCRIPT_DIR/lib/production-launch-agent.zsh"
+
+restore_previous_service_on_startup_failure() {
+  echo "LaunchAgent activation failed; restoring previous release."
+  if [[ -n "$PREVIOUS_RELEASE" && -d "$PREVIOUS_RELEASE" ]]; then
+    ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
+    launchctl bootout "gui/$UID/$LABEL" >/dev/null 2>&1 || true
+    if owl_launch_agent_bootstrap "gui/$UID" "$LABEL" "$PLIST" 3 &&
+      launchctl kickstart -k "gui/$UID/$LABEL"; then
+      echo "Previous Runtime service restored after activation failure."
+    else
+      echo "Previous Runtime service could not restart; check launchd and logs."
+    fi
+  else
+    echo "No previous production release exists to restore."
+  fi
+}
+
 launchctl bootout "gui/$UID/$LABEL" >/dev/null 2>&1 || true
-launchctl bootstrap "gui/$UID" "$PLIST"
-launchctl kickstart -k "gui/$UID/$LABEL"
+if ! owl_launch_agent_bootstrap "gui/$UID" "$LABEL" "$PLIST" 3; then
+  restore_previous_service_on_startup_failure
+  exit 1
+fi
+if ! launchctl kickstart -k "gui/$UID/$LABEL"; then
+  restore_previous_service_on_startup_failure
+  exit 1
+fi
 
 # Read PORT from the production environment without allowing it to change the
 # installer's release/state decisions.
