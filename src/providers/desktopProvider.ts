@@ -151,9 +151,22 @@ async function launchHelper(): Promise<void> {
   });
 
   const socketPath = helperSocketPath();
+  // macOS TCC binds ad-hoc signed Helper permission to the executable CDHash.
+  // For already-authorized legacy Helpers, replacing the app binary revokes
+  // Accessibility. Lock the *launcher* with macOS lockf instead, preserving
+  // the original signed executable while preventing duplicate --serve
+  // processes across separate OWL Runtime instances.
+  // -k keeps the lock inode stable. -t 0 fails if a competing launch
+  // already owns the lock. Do NOT use -n: on macOS it means "do not
+  // create file", not "nonblocking".
+  const helperCommand = helperExecutablePath();
+  const command = process.platform === "darwin" ? "/usr/bin/lockf" : helperCommand;
+  const args = process.platform === "darwin"
+    ? ["-k", "-t", "0", socketPath + ".launch.lock", helperCommand, "--serve", "--socket", socketPath]
+    : ["--serve", "--socket", socketPath];
   const child = spawn(
-    helperExecutablePath(),
-    ["--serve", "--socket", socketPath],
+    command,
+    args,
     {
       detached: true,
       stdio: "ignore",
@@ -181,7 +194,7 @@ async function launchHelper(): Promise<void> {
         return;
       } catch { /* retry while helper is still starting */ }
     }
-    if (child.exitCode != null) {
+    if (child.exitCode != null && child.exitCode !== 75) {
       throw new Error(
         `OWL LAB Helper exited before creating its Unix socket (code ${child.exitCode}).`,
       );
