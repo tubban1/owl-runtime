@@ -105,7 +105,8 @@
     "verify:publish-m9": "OWL_RUNTIME_MODE=test tsx scripts/verify-publish-https-m9.ts && OWL_RUNTIME_MODE=test tsx scripts/verify-publish-resume-m9.ts",
     "verify:git-push-default": "OWL_RUNTIME_MODE=test tsx scripts/verify-git-push-default.ts",
     "verify:macos-helper-single-instance": "node scripts/verify-macos-helper-single-instance.mjs",
-    "verify:macos-helper-launch-lockf": "node scripts/verify-macos-helper-launch-lockf.mjs"
+    "verify:macos-helper-launch-lockf": "node scripts/verify-macos-helper-launch-lockf.mjs",
+    "verify:production-launch-agent": "zsh scripts/tests/test-production-launch-agent.zsh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
