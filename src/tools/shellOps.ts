@@ -423,8 +423,9 @@ export async function executeCommand(
     command,
   });
 
+  const executionStartedAt = Date.now();
   try {
-    return await new Promise<{
+    const executionResult = await new Promise<{
     command: string;
     cwd: string;
     exitCode: number | null;
@@ -511,6 +512,11 @@ export async function executeCommand(
       });
     });
     });
+    return {
+      ...executionResult,
+      concurrencyWaitMs: concurrencyPermit.waitMs,
+      executionDurationMs: Date.now() - executionStartedAt,
+    };
   } finally {
     concurrencyPermit.release();
   }

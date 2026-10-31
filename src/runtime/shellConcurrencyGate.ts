@@ -271,6 +271,11 @@ export async function acquireShellConcurrencyPermit(input: {
         typed.code = "SHELL_CAPACITY_BUSY";
         typed.retryAfterMs = Math.min(5_000,Math.max(pollMs,
           Math.round(waitLimitMs/4)));
+        Object.assign(typed, {
+          stage: "admission",
+          queueWaitMs: elapsed,
+          timedOutWaitingForCapacity: true,
+        });
         typed.admissionMode = budget.mode;
         Object.assign(typed,{
           capacitySnapshot:{

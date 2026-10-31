@@ -364,6 +364,15 @@ export function registerRuntimeHttpApi(
         error: {
           code,
           message,
+          ...(code === "SHELL_CAPACITY_BUSY" &&
+            typeof (error as { queueWaitMs?: unknown }).queueWaitMs === "number"
+            ? {
+                stage: "admission",
+                queueWaitMs: (error as { queueWaitMs: number }).queueWaitMs,
+                retryAfterMs: (error as { retryAfterMs?: number }).retryAfterMs ?? 0,
+                capacitySnapshot: (error as { capacitySnapshot?: unknown }).capacitySnapshot,
+              }
+            : {}),
         },
       });
     }
