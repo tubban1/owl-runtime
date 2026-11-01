@@ -11,11 +11,13 @@ export type RuntimeLeaseClaimsV1 = {
   userId: string;
   organizationId: string;
   deviceId: string;
-  plan: "trial" | "credit" | "pro" | "business";
+  plan: "trial" | "credit" | "pro" | "business" | "developer";
   entitlementStatus:
     | "trial_active"
+    | "developer_active"
     | "active"
     | "trial_expired"
+    | "developer_expired"
     | "payment_required"
     | "suspended";
   entitlementVersion: number;
@@ -138,14 +140,14 @@ export function verifyRuntimeLeaseToken(
   }
 
   const plan = requiredString(claims.plan, "plan");
-  if (!["trial", "credit", "pro", "business"].includes(plan)) {
+  if (!["trial", "credit", "pro", "business", "developer"].includes(plan)) {
     throw new Error("RUNTIME_ACCESS_INVALID_SIGNED_LEASE: invalid plan.");
   }
   const entitlementStatus = requiredString(
     claims.entitlementStatus,
     "entitlementStatus",
   );
-  if (!["trial_active", "active"].includes(entitlementStatus)) {
+  if (!["trial_active", "developer_active", "active"].includes(entitlementStatus)) {
     throw new Error(
       "RUNTIME_ACCESS_ENTITLEMENT_INACTIVE: signed entitlement does not permit execution.",
     );

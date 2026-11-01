@@ -91,6 +91,23 @@ try {
   assert.equal(ready.grant?.entitlementPlan, "trial");
   assert.equal(ready.grant?.features?.runtime, true);
 
+  // A Cloud operator-granted developer entitlement uses the same signed,
+  // device-bound lease contract and must not weaken its verification.
+  const developer = await client.authorizeRuntimeAccess({
+    deviceId: "dev_signed",
+    leaseToken: leaseToken({
+      plan: "developer", entitlementStatus: "developer_active",
+      entitlementVersion: 2,
+      limits: {
+        devices: 2, concurrentTasks: 8,
+        cloudWorkerMinutes: 1_000, storageMb: 10_240,
+      },
+    }),
+  });
+  assert.equal(developer.state, "READY");
+  assert.equal(developer.grant?.entitlementPlan, "developer");
+  assert.equal(developer.grant?.signatureVerified, true);
+
   await assert.rejects(
     () =>
       client.authorizeRuntimeAccess({
