@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import { withExecutionContext } from "../src/runtime/executionContext.js";
 import {
-  callDesktopCompanion,
-  companionOwner,
-} from "../src/adapters/mcp/chromeCompanionBridge.js";
+  callDesktopAgentBrowser,
+  agentBrowserOwner,
+} from "../src/adapters/mcp/desktopAgentBrowserBridge.js";
 
 await assert.rejects(
-  callDesktopCompanion("browser_companion_status"),
-  /CHROME_COMPANION_INTERACTIVE_MCP_REQUIRED/,
+  callDesktopAgentBrowser("browser_agent_status"),
+  /AGENT_BROWSER_BRIDGE_INTERACTIVE_MCP_REQUIRED/,
 );
 await withExecutionContext(
   { sessionId: "test-runtime-session", requestId: "bridge-test", origin: "mcp" },
   async () => {
-    assert.equal(companionOwner(), "owl-runtime:test-runtime-session");
+    assert.equal(agentBrowserOwner(), "owl-runtime:test-runtime-session");
     await assert.rejects(
-      callDesktopCompanion("tool_that_is_not_companion"),
-      /CHROME_COMPANION_TOOL_NOT_ALLOWED/,
+      callDesktopAgentBrowser("tool_that_is_not_companion"),
+      /AGENT_BROWSER_BRIDGE_TOOL_NOT_ALLOWED/,
     );
     const old = process.env.OWL_DESKTOP_MCP_URL;
     try {
@@ -28,8 +28,8 @@ await withExecutionContext(
       ]) {
         process.env.OWL_DESKTOP_MCP_URL = candidate;
         await assert.rejects(
-          callDesktopCompanion("browser_companion_status"),
-          /CHROME_COMPANION_ENDPOINT_NOT_LOOPBACK/,
+          callDesktopAgentBrowser("browser_agent_status"),
+          /AGENT_BROWSER_BRIDGE_ENDPOINT_NOT_LOOPBACK/,
           candidate,
         );
       }
@@ -39,4 +39,4 @@ await withExecutionContext(
     }
   },
 );
-console.log("PASS: Chrome Companion bridge owner, allowlist, and loopback-only security");
+console.log("PASS: Agent Browser bridge owner, allowlist, and loopback-only security");
