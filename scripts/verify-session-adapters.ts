@@ -132,6 +132,7 @@ const {
   listBrowserAgentSessions,
   removeBrowserAgentSession,
   resolvePendingSessionSend,
+  rebindBrowserAgentSession,
   sendAgentMessage,
 } = await import("../src/runtime/sessionAdapters.js");
 const {
@@ -284,12 +285,49 @@ try {
     /unresolved pending send/,
   );
 
+  await assert.rejects(
+    () => rebindBrowserAgentSession(antigravityId, { useActive: true }),
+    /unresolved pending send/,
+  );
+  const stillPending = await readSessionBinding(antigravityId);
+  assert.equal(stillPending.pendingSend?.digest, "simulated-uncertain-send");
+
   const resolved = await resolvePendingSessionSend(
     antigravityId,
     "not_sent",
   );
   assert.equal(resolved.resolved, true);
   assert.equal(resolved.resolution, "not_sent");
+
+  // Both callers pass the initial preflight; only one may submit a turn
+  // after acquiring the browser session lease. The other gets a receipt
+  // deduplication, not a second external submission.
+  const race = await Promise.all([
+    sendAgentMessage(chatgptId, "concurrent send exactly once", {
+      confirm: true, deduplicateAsSuccess: true,
+    }),
+    sendAgentMessage(chatgptId, "concurrent send exactly once", {
+      confirm: true, deduplicateAsSuccess: true,
+    }),
+  ]);
+  assert.equal(race.filter((item) => item.deduplicated === true).length, 1);
+  assert.equal(race.filter((item) => item.deduplicated !== true).length, 1);
+  const afterRace = await readSessionBinding(chatgptId);
+  assert.equal(afterRace.turnCounter, 2);
+  assert.equal(afterRace.pendingSend, undefined);
+  const sameSessionRebind = await rebindBrowserAgentSession(chatgptId, {
+    urlPattern: "/chatgpt",
+  });
+  assert.equal(sameSessionRebind.rebound, true);
+  const afterRebind = await readSessionBinding(chatgptId);
+  assert.equal(afterRebind.turnCounter, 2);
+  assert.equal(afterRebind.lastSentDigest, afterRace.lastSentDigest);
+  assert.deepEqual(afterRebind.lastSendReceipt, afterRace.lastSendReceipt);
+  const afterRebindDuplicate = await sendAgentMessage(
+    chatgptId, "concurrent send exactly once",
+    {confirm: true, deduplicateAsSuccess: true},
+  );
+  assert.equal(afterRebindDuplicate.deduplicated, true);
 
   console.log(
     JSON.stringify(
@@ -305,6 +343,9 @@ try {
         crossSessionCarry: true,
         duplicateSendReceipt: true,
         uncertainSendFreezesReplay: true,
+        uncertainSendAlsoBlocksRebind: true,
+        concurrentSendDeduplicated: true,
+        sameConversationRebindPreservesReceipt: true,
         relayCycles: loopStatus.cycleCount,
       },
       null,

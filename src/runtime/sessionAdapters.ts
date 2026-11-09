@@ -515,7 +515,7 @@ export async function sendAgentMessage(
   const message = text.trim();
   if (!message) throw new Error("Session message cannot be empty.");
 
-  const binding = await readSessionBinding(bindingId);
+  let binding = await readSessionBinding(bindingId);
   const messageDigest = digest(message);
   if (binding.pendingSend) {
     throw new Error(
@@ -546,6 +546,29 @@ export async function sendAgentMessage(
   return await withBrowserLease(
     `runtime.session.send.${binding.adapterId}`,
     async (held) => {
+      // The browser lease serializes sends and rebinds. Re-read under the
+      // lease: the earlier preflight may have observed a stale receipt.
+      binding = await readSessionBinding(bindingId);
+      if (binding.pendingSend) {
+        throw new Error(
+          "Session has an unresolved pending send; reconcile the previous turn before resending.",
+        );
+      }
+      if (!options?.allowDuplicate && binding.lastSentDigest === messageDigest) {
+        if (options?.deduplicateAsSuccess && binding.lastSendReceipt) {
+          return {
+            sessionId: binding.id,
+            adapterId: binding.adapterId,
+            sent: true,
+            deduplicated: true,
+            sameSession: true,
+            messageDigest,
+            turn: binding.turnCounter,
+            receipt: binding.lastSendReceipt,
+          };
+        }
+        throw new Error("Duplicate send blocked by the session receipt.");
+      }
       const tab = await locateBoundTab(binding, held);
       await callPrimitive("web.session", "use_tab", { index: tab.index }, held);
       const currentFingerprint = fingerprint(binding.adapterId, tab.url);
@@ -624,10 +647,20 @@ export async function rebindBrowserAgentSession(
   bindingId: string,
   options?: { useActive?: boolean; urlPattern?: string; titlePattern?: string },
 ) {
-  const binding = await readSessionBinding(bindingId);
+  let binding = await readSessionBinding(bindingId);
   return await withBrowserLease(
     `runtime.session.rebind.${binding.adapterId}`,
     async (held) => {
+      // Re-read after acquiring the same browser lease as send: a send may
+      // have become pending while this rebind was waiting.
+      binding = await readSessionBinding(bindingId);
+      if (binding.pendingSend) {
+        throw new Error(
+          "Session has an unresolved pending send from " +
+            binding.pendingSend.at +
+            ". Resolve it against the original conversation before rebinding.",
+        );
+      }
       const tabs = await browserTabs(held);
       const tab = chooseBindingTab(tabs, {
         useActive: options?.useActive ?? false,
@@ -640,18 +673,28 @@ export async function rebindBrowserAgentSession(
       });
       if (!tab) throw new Error("No tab matched the requested rebind target.");
 
+      const nextFingerprint = fingerprint(binding.adapterId, tab.url);
+      const sameConversation = nextFingerprint === binding.sessionFingerprint;
+      if (!sameConversation && (binding.lastSendReceipt || binding.turnCounter > 0)) {
+        throw new Error(
+          "Session fingerprint changed after messages were sent. Bind a separate session rather than resetting the prior conversation's send receipts.",
+        );
+      }
       binding.expectedUrl = tab.url;
       binding.expectedTitle = tab.title;
-      binding.sessionFingerprint = fingerprint(binding.adapterId, tab.url);
+      binding.sessionFingerprint = nextFingerprint;
       binding.lastSnapshotDigest = undefined;
       binding.lastSnapshotText = undefined;
       binding.lastCaptureDigest = undefined;
       binding.lastCapturedReply = undefined;
-      binding.lastSentDigest = undefined;
-      binding.lastSentText = undefined;
-      binding.pendingSend = undefined;
-      binding.lastSendReceipt = undefined;
-      binding.turnCounter = 0;
+      // Rebinding the same conversation must preserve the previous send
+      // receipt. Otherwise a rebind could bypass duplicate-send safety.
+      if (!sameConversation) {
+        binding.lastSentDigest = undefined;
+        binding.lastSentText = undefined;
+        binding.lastSendReceipt = undefined;
+        binding.turnCounter = 0;
+      }
       await writeSessionBinding(binding);
 
       return {
@@ -670,38 +713,44 @@ export async function resolvePendingSessionSend(
   bindingId: string,
   resolution: "sent" | "not_sent",
 ) {
-  const binding = await readSessionBinding(bindingId);
-  const pending = binding.pendingSend;
-  if (!pending) {
-    return {
-      sessionId: binding.id,
-      resolved: false,
-      reason: "no_pending_send",
-    };
-  }
+  const initial = await readSessionBinding(bindingId);
+  return await withBrowserLease(
+    "runtime.session.resolve." + initial.adapterId,
+    async () => {
+      const binding = await readSessionBinding(bindingId);
+      const pending = binding.pendingSend;
+      if (!pending) {
+        return {
+          sessionId: binding.id,
+          resolved: false,
+          reason: "no_pending_send",
+        };
+      }
 
-  if (resolution === "sent") {
-    binding.turnCounter += 1;
-    binding.lastSentText = pending.text;
-    binding.lastSentDigest = pending.digest;
-    binding.lastSendReceipt = {
-      at: new Date().toISOString(),
-      digest: pending.digest,
-      url: binding.expectedUrl ?? "",
-      title: binding.expectedTitle ?? "",
-      turn: binding.turnCounter,
-    };
-  }
+      if (resolution === "sent") {
+        binding.turnCounter += 1;
+        binding.lastSentText = pending.text;
+        binding.lastSentDigest = pending.digest;
+        binding.lastSendReceipt = {
+          at: new Date().toISOString(),
+          digest: pending.digest,
+          url: binding.expectedUrl ?? "",
+          title: binding.expectedTitle ?? "",
+          turn: binding.turnCounter,
+        };
+      }
 
-  binding.pendingSend = undefined;
-  await writeSessionBinding(binding);
-  return {
-    sessionId: binding.id,
-    resolved: true,
-    resolution,
-    turn: binding.turnCounter,
-    lastSendReceipt: binding.lastSendReceipt ?? null,
-  };
+      binding.pendingSend = undefined;
+      await writeSessionBinding(binding);
+      return {
+        sessionId: binding.id,
+        resolved: true,
+        resolution,
+        turn: binding.turnCounter,
+        lastSendReceipt: binding.lastSendReceipt ?? null,
+      };
+    },
+  );
 }
 
 export async function listBrowserAgentSessions() {
