@@ -41,6 +41,32 @@ async function detectGitRoot(start: string): Promise<string | null> {
   }
 }
 
+// Access roots authorize filesystem paths; they are NOT automatically
+// workspace boundaries. A drive-wide permission must never turn distinct
+// non-Git projects into the same C:\\ write lease.
+const PROJECT_MARKERS = new Set([
+  ".owl-workspace", "package.json", "pyproject.toml",
+  "Cargo.toml", "go.mod", "pom.xml", "project.godot",
+]);
+
+async function markedProjectUnder(input: string, allowed: string): Promise<string | null> {
+  const absolute = path.resolve(input);
+  let current = await fs.realpath(await nearestExistingPath(absolute))
+    .catch(()=>absolute);
+  while (inside(current, allowed)) {
+    try {
+      const names = await fs.readdir(current);
+      if (current!==allowed && names.some(name=>PROJECT_MARKERS.has(name) || name.endsWith(".sln")))
+        return current;
+    } catch { /* ancestor may be unreadable */ }
+    if (current===allowed) break;
+    const parent=path.dirname(current);
+    if(parent===current) break;
+    current=parent;
+  }
+  return null;
+}
+
 function inside(child: string, parent: string): boolean {
   const relative = path.relative(parent, child);
   return (
@@ -69,13 +95,27 @@ async function closestAllowedRoot(candidate: string): Promise<string | null> {
 
 export async function resolveWorkspace(
   candidate: string,
+  options: { requireProjectRoot?: boolean } = {},
 ): Promise<string> {
   const absolute = path.resolve(candidate);
   const gitRoot = await detectGitRoot(absolute);
   if (gitRoot) return await fs.realpath(gitRoot).catch(() => gitRoot);
 
   const allowedRoot = await closestAllowedRoot(absolute);
-  if (allowedRoot) return allowedRoot;
+  if (allowedRoot) {
+    const driveWide = path.parse(allowedRoot).root === allowedRoot;
+    if (!driveWide) return allowedRoot;
+    const marked = await markedProjectUnder(absolute, allowedRoot);
+    if (marked) return marked;
+    if (options.requireProjectRoot) {
+      const error=new Error(
+        "WORKSPACE_PROJECT_ROOT_REQUIRED: file access permission for a whole drive is not a project write lock. Configure a narrower ALLOWED_DIRECTORIES project root, initialize Git, or add a .owl-workspace marker in the project directory."
+      ) as Error & {code?: string};
+      error.code="WORKSPACE_PROJECT_ROOT_REQUIRED";
+      throw error;
+    }
+    return allowedRoot; // read-only operations do not acquire write locks
+  }
 
   return await fs.realpath(await nearestExistingPath(absolute)).catch(
     () => absolute,
@@ -187,7 +227,9 @@ export async function resolveActionWorkspaces(
   const resolved: ResolvedWorkspace[] = [];
   for (const candidate of candidates) {
     resolved.push({
-      workspace: await resolveWorkspace(candidate.path),
+      workspace: await resolveWorkspace(candidate.path, {
+        requireProjectRoot: candidate.mode === "write",
+      }),
       mode: candidate.mode,
       source: candidate.source,
     });

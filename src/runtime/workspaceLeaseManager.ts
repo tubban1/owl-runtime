@@ -245,7 +245,9 @@ export async function ensureWorkspaceWriteLease(
     waitMs?: number;
   },
 ): Promise<WorkspaceLeaseRecord> {
-  const workspace = await resolveWorkspace(workspaceInput);
+  const workspace = await resolveWorkspace(workspaceInput, {
+    requireProjectRoot: true,
+  });
   ensureProductionSelfMutationAllowed(workspace);
   const context = contextWithFallback(options?.context);
   const ownerKey = executionOwnerKey(context);
@@ -331,7 +333,9 @@ export async function assertWorkspaceWriteAllowed(
   workspace: string;
   coveringLease: WorkspaceLeaseRecord | null;
 }> {
-  const workspace = await resolveWorkspace(workspaceInput);
+  const workspace = await resolveWorkspace(workspaceInput, {
+    requireProjectRoot: true,
+  });
   ensureProductionSelfMutationAllowed(workspace);
   const context = contextWithFallback(contextInput);
 

@@ -20,6 +20,9 @@ await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(scratch, { recursive: true });
 
 process.env.ALLOW_SHELL = "true";
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_RESOURCE_TEST_PRESSURE_MODE = "normal";
+process.env.OWL_RESOURCE_TEST_PARALLELISM = "8";
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.PROCESS_STATE_DIR = path.join(scratch, "processes");
 process.env.PROCESS_STATE_KEY_PATH = path.join(scratch, "process.key");

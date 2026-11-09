@@ -233,16 +233,24 @@ export async function listManagedProcesses(): Promise<ManagedProcessRecord[]> {
   const names = await fs.readdir(processDir());
   const records: ManagedProcessRecord[] = [];
 
-  for (const name of names) {
-    if (!name.endsWith(".process")) continue;
-    try {
-      const envelope = JSON.parse(
-        await fs.readFile(path.join(processDir(), name), "utf8"),
-      ) as EncryptedEnvelope;
-      records.push(decrypt(envelope, key));
-    } catch {
-      // One damaged process record must not hide the rest.
-    }
+  // Bound parallel disk reads: the resource admission hot path must not
+  // sequentially await thousands of encrypted process receipts. Keep
+  // corruption isolation, deterministic ordering, and the same decryption.
+  const processFiles = names.filter((name) => name.endsWith(".process"));
+  const BATCH_SIZE = 32;
+  for (let offset = 0; offset < processFiles.length; offset += BATCH_SIZE) {
+    const batch = await Promise.all(processFiles.slice(offset, offset+BATCH_SIZE).map(async name => {
+      try {
+        const envelope = JSON.parse(
+          await fs.readFile(path.join(processDir(), name), "utf8"),
+        ) as EncryptedEnvelope;
+        return decrypt(envelope, key);
+      } catch {
+        // One damaged process record must not hide the rest.
+        return null;
+      }
+    }));
+    for (const record of batch) if (record) records.push(record);
   }
 
   return records.sort((a, b) => b.startedAt.localeCompare(a.startedAt));

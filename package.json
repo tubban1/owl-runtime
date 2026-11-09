@@ -107,7 +107,9 @@
     "verify:macos-helper-single-instance": "node scripts/verify-macos-helper-single-instance.mjs",
     "verify:macos-helper-launch-lockf": "node scripts/verify-macos-helper-launch-lockf.mjs",
     "verify:production-launch-agent": "zsh scripts/tests/test-production-launch-agent.zsh",
-    "verify:agent-browser-mcp-bridge": "OWL_RUNTIME_MODE=test tsx scripts/verify-agent-browser-mcp-bridge.ts"
+    "verify:agent-browser-mcp-bridge": "OWL_RUNTIME_MODE=test tsx scripts/verify-agent-browser-mcp-bridge.ts",
+    "verify:workspace-project-roots": "OWL_RUNTIME_MODE=test tsx scripts/verify-workspace-project-roots.ts",
+    "verify:windows-process-tree-policy": "OWL_RUNTIME_MODE=test tsx scripts/verify-windows-process-tree-policy.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

@@ -19,6 +19,7 @@ import {
   type ManagedProcessRecord,
 } from "../runtime/processStore.js";
 import { resolveWorkspace } from "../runtime/workspaceResolver.js";
+import { terminateOwnedWindowsProcessTree } from "../runtime/windowsProcessTree.js";
 import {
   claimWorkspaceLeaseForRecoveredProcess,
   ensureWorkspaceWriteLease,
@@ -529,7 +530,9 @@ export async function startProcess(
 ) {
   requireCapability("ALLOW_SHELL", false);
   const safeCwd = await assertAllowedExistingPath(cwd);
-  const workspace = await resolveWorkspace(safeCwd);
+  const workspace = await resolveWorkspace(safeCwd, {
+    requireProjectRoot: workspaceMode === "write",
+  });
   const processId = newManagedProcessId();
   const controlToken = newProcessControlToken();
   const context = currentExecutionContext();
@@ -1032,16 +1035,20 @@ export async function killProcess(
   }
 
   let sent = false;
+  let treeStop: Awaited<ReturnType<typeof terminateOwnedWindowsProcessTree>> | null = null;
   const live = liveChildren.get(processId);
-  if (live) {
+  if (process.platform === "win32") {
+    // Windows has no Unix process group. Parent-only SIGTERM used to leave
+    // child HTTP servers listening after the parent exited.
+    treeStop = await terminateOwnedWindowsProcessTree(
+      record.pid,record.startedAt,signal,
+    );
+    sent = treeStop.sent;
+  } else if (live) {
     sent = signalProcessGroup(live.child, signal);
   } else {
     try {
-      if (process.platform !== "win32") {
-        process.kill(-record.pid, signal);
-      } else {
-        process.kill(record.pid, signal);
-      }
+      process.kill(-record.pid, signal);
       sent = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
@@ -1060,6 +1067,7 @@ export async function killProcess(
     sent,
     pid: record.pid,
     status: record.status,
+    ...(treeStop ? {treeStop} : {}),
   };
 }
 
