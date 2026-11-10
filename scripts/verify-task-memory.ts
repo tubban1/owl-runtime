@@ -3,15 +3,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createPersistentPrimitiveTask,
-  deletePersistentTask,
-  getPersistentTaskStatus,
-  listPersistentTasks,
-  runPersistentTask,
-} from "../src/tasks/taskRuntime.js";
-import { ensureTaskStage } from "../src/tasks/taskStaging.js";
-
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -19,13 +10,28 @@ const root = path.resolve(
 const sourcePath = path.join(root, "tmp-verify-task-memory.txt");
 const scratch = path.join(root, ".tmp-verify-task-memory");
 
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_RUNTIME_ACCESS_MODE = "compat";
+process.env.OWL_APPROVAL_MODE = "compat";
+process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.ALLOWED_DIRECTORIES = root;
+process.env.ALLOW_WRITE = "true";
 process.env.TASK_DIR = path.join(scratch, "tasks");
 process.env.TASK_KEY_PATH = path.join(scratch, "task.key");
 process.env.TASK_STAGING_DIR = path.join(scratch, "staging");
 process.env.TASK_STAGING_EXPOSE_TO_FS = "true";
 process.env.EPISODIC_INDEX_DIR = path.join(scratch, "episodes");
 process.env.EPISODIC_INDEX_KEY_PATH = path.join(scratch, "episode.key");
+
+// Freeze test-scoped Runtime env before importing any provider or Task module.
+const {
+  createPersistentPrimitiveTask,
+  deletePersistentTask,
+  getPersistentTaskStatus,
+  listPersistentTasks,
+  runPersistentTask,
+} = await import("../src/tasks/taskRuntime.js");
+const { ensureTaskStage } = await import("../src/tasks/taskStaging.js");
 
 let taskId = "";
 let stagingRoot = "";
