@@ -2,22 +2,26 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { executeRoutedAction } from "../src/router/actionRouter.js";
-import {
-  ApprovalRequiredError,
-  approveApproval,
-  approvalFingerprint,
-  listApprovals,
-} from "../src/policy/approvalPolicy.js";
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scratch = path.join(root, ".tmp-verify-approval-policy");
 await fs.rm(scratch, { recursive: true, force: true });
 await fs.mkdir(scratch, { recursive: true });
 process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.OWL_APPROVAL_MODE = "enforce";
+process.env.OWL_APPROVAL_ACTIONS = "fs.delete,tx.rollback";
+process.env.OWL_APPROVAL_SIDE_EFFECTS = "";
 process.env.ALLOWED_DIRECTORIES = scratch;
 process.env.ALLOW_DELETE = "true";
+
+// Policy config is resolved during import. Establish the isolated enforce
+// environment first or the RC harness may import a cached compat policy.
+const { executeRoutedAction } = await import("../src/router/actionRouter.js");
+const {
+  ApprovalRequiredError,
+  approveApproval,
+  approvalFingerprint,
+  listApprovals,
+} = await import("../src/policy/approvalPolicy.js");
 
 const target = path.join(scratch, "delete-me.txt");
 await fs.writeFile(target, "safe test\n");
