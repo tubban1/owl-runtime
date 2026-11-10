@@ -5,6 +5,8 @@ import { desktopProvider } from "../providers/desktopProvider.js";
 import { getFileInfo } from "../tools/fileOps.js";
 import { gitDiff, gitLog, gitStatus } from "../tools/gitOps.js";
 import { observeProcess } from "../tools/shellOps.js";
+import { inspectMockPublish } from "../providers/publishMockProvider.js";
+import { inspectOfficialPilot } from "../providers/publishOfficialProvider.js";
 import {
   createObservation,
   type Observation,
@@ -532,6 +534,55 @@ export async function observeRoutedActionOutcome(
   args: JsonObject,
   result: unknown,
 ): Promise<Observation | null> {
+  if (action === "publish.mock_effect") {
+    const effectKey = stringField(args, "effectKey");
+    if (!effectKey) return null;
+    // Only the TEST-ONLY local journal is consulted. This is not evidence
+    // of publication or remote state; no receipt contents are exported.
+    const observed = await inspectMockPublish(effectKey);
+    return createObservation({
+      channel: "environment",
+      provider: "publish-mock",
+      state: observed.found ? "ready" : "unknown",
+      data: {
+        found: observed.found,
+        receiptKind: observed.receipt?.kind ?? null,
+        keyMatches: observed.receipt?.effectKey === effectKey,
+        digestMatches: Boolean(observed.receipt?.intentDigest &&
+          observed.receipt.intentDigest === stringField(result, "intentDigest")),
+        livePublishingDisabled: observed.livePublishingEnabled === false,
+      },
+      evidence: [{ kind: "structured" }],
+    });
+  }
+  if (action === "publish.official_upload_test") {
+    const effectKey = stringField(args, "effectKey");
+    if (!effectKey) return null;
+    const inspected = await inspectOfficialPilot(effectKey);
+    const record = inspected.record;
+    const stageMatches = record?.stage === stringField(result, "stage");
+    // VERIFY only the deliberately fake test protocol: VERIFIED means the
+    // YouTube private test upload was independently re-read; Instagram
+    // READY_TO_PUBLISH is merely staged, never actually published.
+    const stageAccepted = record?.stage === "VERIFIED" ||
+      record?.stage === "READY_TO_PUBLISH";
+    return createObservation({
+      channel: "environment",
+      provider: "publish-official-test",
+      state: record ? "ready" : "unknown",
+      data: {
+        found: Boolean(record),
+        testOnly: inspected.testOnly === true,
+        published: inspected.published === true,
+        kindMatches: record?.kind === "OFFICIAL_PROTOCOL_TEST",
+        stageMatches,
+        stageAccepted,
+        digestMatches: Boolean(record?.digest &&
+          record.digest === stringField(result, "digest")),
+      },
+      evidence: [{ kind: "structured" }],
+    });
+  }
   if (
     [
       "fs.mkdir",
@@ -710,6 +761,42 @@ export function defaultVerificationForAction(
   result: unknown,
   observation: Observation | null,
 ): VerificationReceipt | null {
+  if (action === "publish.mock_effect") {
+    if (!observation) return uncertainVerificationReceipt({
+      id: "default:publish.mock_effect",
+      expectations: [{ path: "data", operator: "exists" }],
+    }, "TEST mock receipt could not be independently re-read.", observation);
+    return verifyObservation(observation, {
+      id: "default:publish.mock_effect",
+      description: "Independently re-read the TEST-ONLY mock receipt; never infer live publication.",
+      expectations: [
+        { path: "data.found", operator: "equals", expected: true },
+        { path: "data.receiptKind", operator: "equals", expected: "MOCK_ONLY" },
+        { path: "data.keyMatches", operator: "equals", expected: true },
+        { path: "data.digestMatches", operator: "equals", expected: true },
+        { path: "data.livePublishingDisabled", operator: "equals", expected: true },
+      ],
+    });
+  }
+  if (action === "publish.official_upload_test") {
+    if (!observation) return uncertainVerificationReceipt({
+      id: "default:publish.official_upload_test",
+      expectations: [{ path: "data", operator: "exists" }],
+    }, "TEST official protocol journal could not be independently re-read.", observation);
+    return verifyObservation(observation, {
+      id: "default:publish.official_upload_test",
+      description: "Re-read TEST-ONLY protocol journal; VERIFIED / READY_TO_PUBLISH is not a live publication.",
+      expectations: [
+        { path: "data.found", operator: "equals", expected: true },
+        { path: "data.testOnly", operator: "equals", expected: true },
+        { path: "data.published", operator: "equals", expected: false },
+        { path: "data.kindMatches", operator: "equals", expected: true },
+        { path: "data.stageMatches", operator: "equals", expected: true },
+        { path: "data.stageAccepted", operator: "equals", expected: true },
+        { path: "data.digestMatches", operator: "equals", expected: true },
+      ],
+    });
+  }
   if (!observation) return null;
 
   if (action === "fs.mkdir") {

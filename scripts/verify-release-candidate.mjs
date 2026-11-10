@@ -77,6 +77,7 @@ const checks = [
   ["action-observation", "npm", ["run", "verify:action-observation"]],
   ["verification-coverage", "npm", ["run", "verify:verification-coverage"]],
   ["task-orchestration", "npm", ["run", "verify:task-orchestration"]],
+  ["task-budget-terminal", "npm", ["run", "verify:task-budget-terminal"]],
   ["browser-postconditions", "npm", ["run", "verify:browser-postconditions"]],
   ["browser-cancellation", "npm", ["run", "verify:browser-cancellation"]],
   ["browser-idle-freeze", "npm", ["run", "verify:browser-idle-freeze"]],

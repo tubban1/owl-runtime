@@ -1554,6 +1554,19 @@ export async function runPersistentTask(
     await writePersistentTask(task);
 
     while (true) {
+      // Terminal success has priority over run-scoped time/wave limits.
+      // A slow final step may finish after the caller's budget; the task
+      // must still become completed, not paused with 100% successful steps.
+      if (task.steps.every((step) => step.state === "succeeded")) {
+        task.status = "completed";
+        task.completedAt = new Date().toISOString();
+        appendTaskEvent(task, {
+          type: "task_completed",
+          message: "All task steps succeeded.",
+        });
+        break;
+      }
+
       if (wavesExecuted >= maxWaves) {
         task.status = "paused";
         task.pausedAt = new Date().toISOString();
@@ -1595,16 +1608,6 @@ export async function runPersistentTask(
         appendTaskEvent(task, {
           type: "run_paused",
           message: "Task stopped after pause request.",
-        });
-        break;
-      }
-
-      if (task.steps.every((step) => step.state === "succeeded")) {
-        task.status = "completed";
-        task.completedAt = new Date().toISOString();
-        appendTaskEvent(task, {
-          type: "task_completed",
-          message: "All task steps succeeded.",
         });
         break;
       }
