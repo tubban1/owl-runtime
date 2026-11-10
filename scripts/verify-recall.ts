@@ -8,6 +8,11 @@ const scratch = path.join(root, ".tmp-verify-recall");
 const okPath = path.join(root, "tmp-recall-checkpoint.txt");
 const missingPath = path.join(root, "tmp-recall-does-not-exist.txt");
 
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_RUNTIME_ACCESS_MODE = "compat";
+process.env.OWL_APPROVAL_MODE = "compat";
+process.env.OWL_STATE_ROOT = path.join(scratch, "state");
+process.env.ALLOW_WRITE = "true";
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.TASK_DIR = path.join(scratch, "tasks");
 process.env.TASK_KEY_PATH = path.join(scratch, "task.key");

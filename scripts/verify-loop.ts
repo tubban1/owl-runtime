@@ -8,7 +8,12 @@ const scratch = path.join(root, ".tmp-verify-loop");
 const sourcePath = path.join(root, "tmp-loop-source.txt");
 const relayPath = path.join(root, "tmp-loop-relay.txt");
 
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_RUNTIME_ACCESS_MODE = "compat";
+process.env.OWL_APPROVAL_MODE = "compat";
+process.env.OWL_STATE_ROOT = path.join(scratch, "state");
 process.env.ALLOWED_DIRECTORIES = root;
+process.env.ALLOW_WRITE = "true";
 process.env.LOOP_DIR = path.join(scratch, "loops");
 process.env.LOOP_KEY_PATH = path.join(scratch, "loop.key");
 process.env.TASK_DIR = path.join(scratch, "tasks");
