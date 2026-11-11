@@ -1715,7 +1715,7 @@ function createServer() {
 
   server.tool(
     "desktop_click",
-    "Click an absolute screen coordinate on macOS. Requires Accessibility permission and ALLOW_GUI=true.",
+    "Click a local desktop coordinate. On Windows, UI Automation is preferred; physical cursor input requires local foreground consent.",
     {
       x: z.number().min(0),
       y: z.number().min(0),
@@ -1738,7 +1738,7 @@ function createServer() {
 
   server.tool(
     "desktop_type",
-    "Type text into the focused macOS UI element. Requires Accessibility permission and ALLOW_GUI=true.",
+    "Type into a focused desktop control. Windows uses UI Automation or locally consented foreground keyboard input.",
     { text: z.string() },
     {
       title: "Desktop Type",
@@ -1758,7 +1758,7 @@ function createServer() {
 
   server.tool(
     "desktop_key",
-    "Send a named key or single character with optional modifiers to macOS. Requires Accessibility permission and ALLOW_GUI=true.",
+    "Send a key on the local desktop. Windows requires explicit local foreground-takeover consent.",
     {
       key: z.string().min(1),
       modifiers: z.array(z.enum(["command", "option", "control", "shift"])).optional(),
@@ -1781,7 +1781,7 @@ function createServer() {
 
   server.tool(
     "desktop_screenshot",
-    "Capture the current macOS screen and save it inside ALLOWED_DIRECTORIES. Requires Screen Recording permission and ALLOW_GUI=true.",
+    "Capture the local screen inside ALLOWED_DIRECTORIES, subject to operating-system permissions.",
     { path: z.string() },
     {
       title: "Desktop Screenshot",

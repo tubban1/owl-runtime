@@ -5,3 +5,5 @@ build/
 .DS_Store
 .soak-results/
 .release-evidence/
+# Compiled local Windows GUI Helper is validated by SHA-256 and staged per release.
+windows-helper/bin/

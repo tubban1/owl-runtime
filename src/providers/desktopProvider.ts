@@ -8,6 +8,7 @@ import path from "node:path";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { envFlag } from "../security/capabilities.js";
+import { windowsGuiAction, windowsGuiModeStatus } from "./windowsGuiHelper.js";
 import { assertAllowedTargetPath } from "../security/pathGuard.js";
 import type { ComputerProvider, ProviderStatus } from "./types.js";
 
@@ -1233,104 +1234,143 @@ class DesktopProvider implements ComputerProvider {
 }
 
 
-// Windows reuses the same action router, provider contract and UI element shape
-// as macOS. Only the platform-specific OS introspection is substituted here.
-// Mutating desktop methods remain inherited and fail closed on non-macOS until
-// the separate Windows signed native Helper is available.
-const windowsUiReadOnlyScript = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../scripts/windows/desktop-readonly.ps1",
-);
-async function windowsUiReadOnly(
-  op: "status" | "frontmost_app" | "window_bounds" | "ui_tree" | "screenshot",
-  appName?: string,
-  maxElements?: number,
-  outputPath?: string,
-): Promise<any> {
-  if (process.platform !== "win32")
-    throw new Error("WINDOWS_UIA_PLATFORM_REQUIRED");
-  if (!envFlag("ALLOW_GUI", false))
-    throw new Error("ALLOW_GUI is disabled by OWL Runtime policy.");
-  if (!fsSync.existsSync(windowsUiReadOnlyScript))
-    throw new Error("WINDOWS_UIA_READONLY_HELPER_NOT_INSTALLED");
-  return await new Promise((resolve, reject) => {
-    const args = [
-      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-      "-File", windowsUiReadOnlyScript, "-Action", op,
-      ...(appName ? ["-AppName", appName] : []),
-      ...(maxElements ? ["-MaxElements", String(Math.min(300,Math.max(1,maxElements)))] : []),
-      ...(outputPath ? ["-OutputPath",outputPath] : []),
-    ];
-    const child = spawn("powershell.exe", args, {
-      shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-    });
-    const chunks: Buffer[] = [];
-    const errors: Buffer[] = [];
-    let total = 0;
-    const timeout = setTimeout(() => child.kill(), 10_000);
-    child.stdout?.on("data", (value: Buffer) => {
-      total += value.length;
-      if (total > 512_000) child.kill();
-      else chunks.push(value);
-    });
-    child.stderr?.on("data", (value: Buffer) => {
-      if (errors.reduce((n,chunk)=>n+chunk.length,0)<8_000)errors.push(value);
-    });
-    child.once("error", (error) => { clearTimeout(timeout); reject(error); });
-    child.once("close", (code) => {
-      clearTimeout(timeout);
-      if(code!==0 || total>512_000) {
-        reject(new Error("WINDOWS_UIA_READONLY_FAILED: " +
-          (Buffer.concat(errors).toString("utf8").slice(0,200) || String(code))));
-        return;
-      }
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        reject(new Error("WINDOWS_UIA_INVALID_JSON"));
-      }
-    });
-  });
-}
+// Windows uses the same authorized Runtime action router as macOS, but does
+// not reuse macOS Helper, AppleScript, or physical pointer semantics.
+// Background UIA Invoke / ValuePattern are preferred over foreground takeover.
 class WindowsDesktopProvider extends DesktopProvider {
   override async status(): Promise<ProviderStatus> {
-    const available = fsSync.existsSync(windowsUiReadOnlyScript);
+    const info = windowsGuiModeStatus();
+    const caps: ProviderStatus["capabilities"] = ["desktop", "accessibility", "ui-tree"];
+    if (info.available) caps.push("region-screenshot");
+    if (info.enabled) caps.push("native-helper");
+    if (info.semanticInput) caps.push("clipboard");
     return {
       id: "desktop", label: "Desktop",
-      enabled: available && envFlag("ALLOW_GUI", false),
-      available,
-      capabilities: ["desktop","accessibility","ui-tree"],
+      enabled: info.enabled,
+      available: info.available,
+      capabilities: caps,
       executionTargets: ["host"],
       details: {
-        platform:"win32",
-        helperMode:"powershell-uia-readonly",
-        helperInstalled:available,
-        nativeInput:false,
-        screenshot:"virtual-screen-readonly",
-        clipboard:false,
-        note:"Windows Dev UI Automation and whole-screen PNG capture are read-only. Click, keyboard and clipboard still require a separately approved Windows Helper.",
+        platform: "win32",
+        helperMode: info.helperMode,
+        helperInstalled: info.helperInstalled,
+        componentVerified: info.componentVerified,
+        nativeInput: info.semanticInput,
+        foregroundInput: info.foregroundInput,
+        clipboard: info.semanticInput,
+        readOnly: info.readOnly,
+        note: info.reason ?? (info.foregroundInput
+          ? "Foreground takeover is explicitly enabled: native mouse/keyboard may move the real cursor or change the focused application. UAC/secure desktop is blocked."
+          : info.semanticInput
+          ? "Background UI Automation semantic actions are enabled. Foreground mouse/keyboard takeover remains disabled."
+          : "Windows GUI is inspection-only. Native input requires explicit local user consent."),
       },
     };
   }
+
+  override async helperStatus() {
+    return { ...windowsGuiModeStatus(),
+      ...(windowsGuiModeStatus().enabled
+        ? await windowsGuiAction("status") : {}) };
+  }
+  override async helperRequestPermissions() {
+    throw Error("WINDOWS_GUI_CONSENT_MUST_BE_GRANTED_LOCALLY_IN_DESKTOP");
+  }
+  override async frontmostApp() {
+    return windowsGuiAction("frontmost_app");
+  }
+  override async openApp(appName: string) {
+    return windowsGuiAction("open_app", { appName });
+  }
+  override async windowBounds(appName?: string) {
+    return windowsGuiAction("window_bounds", { appName });
+  }
+  override async uiTree(appName?: string, maxElements = 300): Promise<{
+    app: string; elements: DesktopUiElement[]; truncated: boolean;
+  }> {
+    return windowsGuiAction("ui_tree", {
+      appName,
+      maxElements: Math.max(1, Math.min(300, Math.trunc(maxElements))),
+    });
+  }
+  override async uiFind(query: string, appName?: string,
+    maxResults = 20, maxElements = 500) {
+    if (!query.trim()) throw Error("WINDOWS_GUI_INVALID_QUERY");
+    const tree = await this.uiTree(appName, Math.min(300, maxElements));
+    const matches = tree.elements.filter((e: DesktopUiElement) =>
+      [e.name, e.role, e.description].join(" ")
+        .toLowerCase().includes(query.trim().toLowerCase()),
+    ).slice(0, Math.min(100, maxResults));
+    return { app: tree.app, query, matches,
+      scanned: tree.elements.length, truncated: tree.truncated };
+  }
+  override async clickElement(query: string, appName?: string, matchIndex = 0) {
+    if (typeof query !== "string" || !query.trim()) throw Error("WINDOWS_GUI_INVALID_QUERY");
+    // Direct UIA Invoke/Toggle/Select avoids the Mac implementation's
+    // center-coordinate fallback and does not steal the user's mouse.
+    return windowsGuiAction("click_element", { query, appName, matchIndex });
+  }
+  override async click(x: number, y: number) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw Error("WINDOWS_GUI_INVALID_COORDINATE");
+    // Native helper tries UIA semantic invocation first. Only a separately
+    // authorized foreground input mode may move the physical cursor.
+    return windowsGuiAction("click", { x: Math.round(x), y: Math.round(y) });
+  }
+  override async type(text: string, _preserveClipboard = true) {
+    if (typeof text !== "string" || text.length > 8192)
+      throw Error("WINDOWS_GUI_TEXT_TOO_LONG");
+    // ValuePattern.SetValue replaces the focused edit control's content.
+    // For controls lacking ValuePattern, the helper allows SendInput Unicode
+    // only after a second, explicit foreground-takeover opt-in.
+    return windowsGuiAction("type", { text });
+  }
+  override async key(
+    key: string,
+    modifiers: Array<"command" | "option" | "control" | "shift"> = [],
+  ) {
+    return windowsGuiAction("key", { key, modifiers });
+  }
   override async screenshot(outputPath: string) {
-    if (!envFlag("ALLOW_GUI",false)) {
-      throw new Error("ALLOW_GUI is disabled by OWL Runtime policy.");
-    }
-    if (path.extname(outputPath).toLowerCase() !== ".png") {
-      throw new Error("WINDOWS_UIA_SCREENSHOT_PNG_REQUIRED");
-    }
     const safePath = await assertAllowedTargetPath(outputPath);
     await fs.mkdir(path.dirname(safePath), { recursive: true });
-    return windowsUiReadOnly("screenshot", undefined, undefined, safePath);
+    return windowsGuiAction("screenshot", { path: safePath });
   }
-  override async helperStatus() { return windowsUiReadOnly("status"); }
-  override async frontmostApp() { return windowsUiReadOnly("frontmost_app"); }
-  override async windowBounds(appName?: string) {
-    return windowsUiReadOnly("window_bounds",appName);
+  override async screenshotRegion(
+    outputPath: string, x: number, y: number, width: number, height: number,
+  ) {
+    const region = [x, y, width, height].map(Math.round);
+    if (!region.every(Number.isFinite) || region[2] <= 0 || region[3] <= 0)
+      throw Error("WINDOWS_GUI_INVALID_REGION");
+    const safePath = await assertAllowedTargetPath(outputPath);
+    await fs.mkdir(path.dirname(safePath), { recursive: true });
+    return windowsGuiAction("screenshot_region", {
+      path: safePath, x: region[0], y: region[1],
+      width: region[2], height: region[3],
+    });
   }
-  override async uiTree(appName?: string,maxElements=300) {
-    return windowsUiReadOnly("ui_tree",appName,maxElements);
+  override async screenshotWindow(_outputPath: string, _appName?: string) {
+    throw Error("WINDOWS_GUI_BACKGROUND_WINDOW_CAPTURE_NOT_AVAILABLE");
+  }
+  override async ocrWindow(_outputPath: string, _appName?: string, _languages: string[] = []) {
+    throw Error("WINDOWS_GUI_NATIVE_OCR_NOT_AVAILABLE");
+  }
+  override async clipboardInfo() { return windowsGuiAction("clipboard_info"); }
+  override async clipboardRead() { return windowsGuiAction("clipboard_read"); }
+  override async clipboardWrite(text: string) {
+    return windowsGuiAction("clipboard_write", { text });
+  }
+  override async clipboardSnapshot(): Promise<any> {
+    throw Error("WINDOWS_GUI_CLIPBOARD_TRANSACTION_NOT_AVAILABLE");
+  }
+  override async clipboardRestore(_token: string): Promise<any> {
+    throw Error("WINDOWS_GUI_CLIPBOARD_TRANSACTION_NOT_AVAILABLE");
+  }
+  override async clipboardCopySelection(
+    _timeoutMs = 2000, _restore = true,
+  ): Promise<any> {
+    throw Error("WINDOWS_GUI_CLIPBOARD_TRANSACTION_NOT_AVAILABLE");
   }
 }
+
 export const desktopProvider = process.platform === "win32"
   ? new WindowsDesktopProvider() : new DesktopProvider();

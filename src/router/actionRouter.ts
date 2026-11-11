@@ -572,13 +572,13 @@ const actions = {
 
   "desktop.frontmost_app": {
     provider: "desktop",
-    description: "Read the frontmost macOS application.",
+    description: "Read the local frontmost application (macOS or Windows; availability is capability-gated).",
     schema: noArgs,
     run: () => desktopProvider.frontmostApp(),
   },
   "desktop.open_app": {
     provider: "desktop",
-    description: "Activate a macOS application.",
+    description: "Activate an existing desktop application; Windows foreground takeover requires explicit local consent.",
     schema: z.object({ app_name: z.string().min(1) }),
     run: ({ app_name }: any) => desktopProvider.openApp(app_name),
   },
@@ -597,14 +597,14 @@ const actions = {
   },
   "desktop.click": {
     provider: "desktop",
-    description: "Click an absolute macOS screen coordinate.",
+    description: "Click a local screen coordinate; Windows prefers UI Automation and requires explicit consent for physical pointer fallback.",
     schema: z.object({ x: z.number().min(0), y: z.number().min(0) }),
     destructive: true,
     run: ({ x, y }: any) => desktopProvider.click(x, y),
   },
   "desktop.type": {
     provider: "desktop",
-    description: "Type into the focused macOS control using clipboard paste. Preserves a plain-text clipboard by default.",
+    description: "Type into a focused local desktop control. macOS uses clipboard paste; Windows prefers UI Automation and requires foreground consent for raw keyboard input.",
     schema: z.object({
       text: z.string(),
       preserve_clipboard: z.boolean().optional(),
@@ -625,7 +625,7 @@ const actions = {
   },
   "desktop.screenshot": {
     provider: "desktop",
-    description: "Save a macOS desktop screenshot.",
+    description: "Save a local desktop screenshot when supported by the device.",
     schema: z.object({ path: z.string() }),
     run: ({ path }: any) => desktopProvider.screenshot(path),
   },
@@ -660,7 +660,7 @@ const actions = {
   },
   "desktop.ui_tree": {
     provider: "desktop",
-    description: "Read a bounded macOS Accessibility UI tree for an application.",
+    description: "Read a bounded desktop Accessibility/UI Automation tree for an application.",
     schema: z.object({
       app_name: z.string().min(1).optional(),
       max_elements: z.number().int().min(1).max(1000).optional(),
@@ -699,7 +699,7 @@ const actions = {
   },
   "desktop.screenshot_region": {
     provider: "desktop",
-    description: "Capture a rectangular macOS screen region.",
+    description: "Capture a rectangular local desktop screen region.",
     schema: z.object({
       path: z.string(),
       x: z.number().min(0),
