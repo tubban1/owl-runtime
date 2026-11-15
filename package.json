@@ -39,7 +39,7 @@
     "verify:concurrency": "OWL_RUNTIME_MODE=test tsx scripts/verify-concurrency.ts",
     "verify:production-runtime": "npm run build && OWL_RUNTIME_MODE=test tsx scripts/verify-production-runtime.ts",
     "verify:drain-handoff": "OWL_RUNTIME_MODE=test tsx scripts/verify-drain-handoff.ts",
-    "verify:fault-recovery": "OWL_RUNTIME_MODE=test tsx scripts/verify-fault-recovery.ts",
+    "verify:fault-recovery": "node scripts/run-isolated-verify.mjs verify-fault-recovery",
     "verify:recovery-matrix": "npm run verify:fault-recovery && npm run verify:concurrency && npm run verify:session-adapters && npm run verify:wechat-session && npm run verify:state-schema",
     "soak:smoke": "OWL_RUNTIME_MODE=test SOAK_PROFILE=smoke tsx scripts/soak-runtime.ts",
     "soak:2h": "OWL_RUNTIME_MODE=test SOAK_PROFILE=2h tsx scripts/soak-runtime.ts",
@@ -80,7 +80,7 @@
     "verify:rc": "npm run verify:rc-fast && npm run soak:smoke",
     "verify:execution-revision": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-revision.ts",
     "verify:execution-activation": "OWL_RUNTIME_MODE=test tsx scripts/verify-execution-activation.ts",
-    "verify:approval-resume": "OWL_RUNTIME_MODE=test tsx scripts/verify-approval-resume.ts",
+    "verify:approval-resume": "node scripts/run-isolated-verify.mjs verify-approval-resume",
     "verify:public-dto": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-dto.ts",
     "verify:storage-foundation": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-foundation.ts",
     "verify:storage-retention": "OWL_RUNTIME_MODE=test tsx scripts/verify-storage-retention.ts",
@@ -110,7 +110,8 @@
     "verify:production-launch-agent": "zsh scripts/tests/test-production-launch-agent.zsh",
     "verify:agent-browser-mcp-bridge": "OWL_RUNTIME_MODE=test tsx scripts/verify-agent-browser-mcp-bridge.ts",
     "verify:workspace-project-roots": "OWL_RUNTIME_MODE=test tsx scripts/verify-workspace-project-roots.ts",
-    "verify:windows-process-tree-policy": "OWL_RUNTIME_MODE=test tsx scripts/verify-windows-process-tree-policy.ts"
+    "verify:windows-process-tree-policy": "OWL_RUNTIME_MODE=test tsx scripts/verify-windows-process-tree-policy.ts",
+    "verify:state-isolation": "node scripts/run-isolated-verify.mjs verify-state-isolation"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
