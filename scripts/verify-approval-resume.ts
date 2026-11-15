@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { InProcessRuntimeClient } from "../src/public/runtimeClient.js";
+// Import only after test state and access policy are configured.
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "owl-approval-resume-"));
+process.env.OWL_RUNTIME_MODE = "test";
+process.env.OWL_STATE_ROOT = root;
 process.env.AGENTOS_STATE_ROOT = root;
 process.env.ALLOWED_DIRECTORIES = root;
 process.env.ALLOW_DELETE = "true";
 process.env.OWL_APPROVAL_MODE = "enforce";
 process.env.OWL_APPROVAL_ACTIONS = "fs.delete";
 
+const { InProcessRuntimeClient } = await import("../src/public/runtimeClient.js");
 const client = new InProcessRuntimeClient();
 const target = path.join(root, "delete-after-approval.txt");
 await fs.writeFile(target, "must survive until exact approval\n");

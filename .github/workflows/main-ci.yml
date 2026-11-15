@@ -24,6 +24,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Fail before synthetic tests can accidentally target a live state root.
+      - run: npm run verify:state-isolation
+      - run: npm run verify:approval-resume
+      - run: npm run verify:fault-recovery
       - run: npm run verify:shell-concurrency-cap
       - run: npx tsx scripts/verify-shell-delete-review.ts
       - run: npm run verify:publish-m6
