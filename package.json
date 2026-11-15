@@ -111,7 +111,8 @@
     "verify:agent-browser-mcp-bridge": "OWL_RUNTIME_MODE=test tsx scripts/verify-agent-browser-mcp-bridge.ts",
     "verify:workspace-project-roots": "OWL_RUNTIME_MODE=test tsx scripts/verify-workspace-project-roots.ts",
     "verify:windows-process-tree-policy": "OWL_RUNTIME_MODE=test tsx scripts/verify-windows-process-tree-policy.ts",
-    "verify:state-isolation": "node scripts/run-isolated-verify.mjs verify-state-isolation"
+    "verify:state-isolation": "node scripts/run-isolated-verify.mjs verify-state-isolation",
+    "verify:shell-exec-settlement": "tsx scripts/verify-shell-exec-settlement.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
