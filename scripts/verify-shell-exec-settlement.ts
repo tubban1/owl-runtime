@@ -14,7 +14,7 @@ process.env.SHELL=process.platform==='win32'?'powershell.exe':'/bin/sh';
 const {executeCommand}=await import('../src/tools/shellOps.js');
 const run=code=>'node -e '+JSON.stringify(code);
 try{
- const childScript=`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},4000)'],{detached:true,stdio:['ignore',1,2]});p.unref()`;
+ const childScript=`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},4000)'],{detached:true,cwd:require('node:os').tmpdir(),stdio:['ignore',1,2]});p.unref()`;
  const began=Date.now();
  const inherited=await executeCommand(run(childScript),scratch,6000);
  const elapsed=Date.now()-began;
@@ -31,4 +31,8 @@ try{
  assert.ok(timeoutDuration<6000,`Timeout did not release mutation/permit: ${timeoutDuration}ms`);
  console.log(JSON.stringify({ok:true,inheritedPipeSettlementMs:elapsed,
    deadlineSettlementMs:timeoutDuration,unknownResultFlagPreserved:true}));
-}finally{await fs.rm(scratch,{recursive:true,force:true})}
+}finally{
+  // Windows releases process working-directory handles asynchronously after
+  // the shell returns. Retry bounded cleanup; never touch any user directory.
+  await fs.rm(scratch,{recursive:true,force:true,maxRetries:40,retryDelay:200});
+}
