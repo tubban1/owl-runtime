@@ -28,7 +28,20 @@ jobs:
       - run: npm run verify:state-isolation
       - run: npm run verify:approval-resume
       - run: npm run verify:fault-recovery
+      - run: npm run verify:shell-exec-settlement
       - run: npm run verify:shell-concurrency-cap
       - run: npx tsx scripts/verify-shell-delete-review.ts
       - run: npm run verify:publish-m6
       - run: npm run verify:publish-m9
+  verify-windows-shell:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run verify:shell-exec-settlement

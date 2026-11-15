@@ -427,91 +427,122 @@ export async function executeCommand(
   const executionStartedAt = Date.now();
   try {
     const executionResult = await new Promise<{
-    command: string;
-    cwd: string;
-    exitCode: number | null;
-    signal: NodeJS.Signals | null;
-    stdout: string;
-    stderr: string;
-    timedOut: boolean;
-  }>((resolve, reject) => {
-    const child = spawn(shellBinary(), ["-c", command], {
-      cwd: safeCwd,
-      env: process.env,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let cancelled = false;
-    let cancellationReason: unknown;
-    let settled = false;
-
-    const cleanup = () => {
-      cancellationSignal?.removeEventListener("abort", onAbort);
-    };
-
-    const terminate = () => {
-      signalProcessGroup(child, "SIGTERM");
-      setTimeout(() => {
-        try {
-          signalProcessGroup(child, "SIGKILL");
-        } catch {
-          // Process already exited.
-        }
-      }, 2_000).unref();
-    };
-
-    const onAbort = () => {
-      if (settled || cancelled) return;
-      cancelled = true;
-      cancellationReason = cancellationSignal?.reason;
-      terminate();
-    };
-
-    child.stdout?.on("data", (chunk) => {
-      stdout = appendCapped(stdout, chunk);
-    });
-    child.stderr?.on("data", (chunk) => {
-      stderr = appendCapped(stderr, chunk);
-    });
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error);
-    });
-
-    cancellationSignal?.addEventListener("abort", onAbort, { once: true });
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      terminate();
-    }, Math.min(Math.max(timeoutMs, 1_000), 10 * 60_000));
-
-    child.on("close", (exitCode, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      cleanup();
-
-      if (cancelled) {
-        reject(new OperationCancelledError(cancellationReason));
-        return;
-      }
-
-      resolve({
-        command,
+      command: string;
+      cwd: string;
+      exitCode: number | null;
+      signal: NodeJS.Signals | null;
+      stdout: string;
+      stderr: string;
+      timedOut: boolean;
+      outputComplete: boolean;
+      outcomeUncertain: boolean;
+    }>((resolve, reject) => {
+      const pidRecordedAt = new Date().toISOString();
+      const child = spawn(shellBinary(), ["-c", command], {
         cwd: safeCwd,
-        exitCode,
-        signal,
-        stdout,
-        stderr,
-        timedOut,
+        env: process.env,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
       });
-    });
+
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      let cancelled = false;
+      let cancellationReason: unknown;
+      let settled = false;
+      let forcedSettlement: NodeJS.Timeout | undefined;
+      let exitGrace: NodeJS.Timeout | undefined;
+      let timeoutTimer: NodeJS.Timeout;
+
+      const clear = () => {
+        clearTimeout(timeoutTimer);
+        if (forcedSettlement) clearTimeout(forcedSettlement);
+        if (exitGrace) clearTimeout(exitGrace);
+        cancellationSignal?.removeEventListener("abort", onAbort);
+      };
+
+      const settle = (
+        code: number | null,
+        signal: NodeJS.Signals | null,
+        outputComplete: boolean,
+      ) => {
+        if (settled) return;
+        settled = true;
+        clear();
+        // A detached grandchild can inherit stdout/stderr and keep these
+        // pipes open forever after the owned shell has already exited. Never
+        // let pipe EOF be the sole mechanism releasing a Runtime mutation.
+        if (!outputComplete) {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+        }
+        if (cancelled) {
+          reject(new OperationCancelledError(cancellationReason));
+          return;
+        }
+        resolve({
+          command, cwd: safeCwd, exitCode: code, signal, stdout, stderr,
+          timedOut, outputComplete,
+          // The shell may have spawned work still running after its exit.
+          // An Agent must query receipts instead of blindly replaying it.
+          outcomeUncertain: timedOut || !outputComplete,
+        });
+      };
+
+      const terminate = () => {
+        if (process.platform === "win32" && child.pid) {
+          // PID-birth verification protects against reusing a Windows PID;
+          // terminate its owned descendants, not just powershell.exe itself.
+          void terminateOwnedWindowsProcessTree(child.pid, pidRecordedAt)
+            .catch(() => {
+              try { signalProcessGroup(child, "SIGTERM"); } catch { /* unverified */ }
+            });
+        } else {
+          try { signalProcessGroup(child, "SIGTERM"); } catch { /* unverified */ }
+          setTimeout(() => {
+            try { signalProcessGroup(child, "SIGKILL"); } catch { /* exited */ }
+          }, 2_000).unref();
+        }
+        // A failed signal and inherited stdio must not leave the HTTP/MCP
+        // request, workspace permit and lifecycle mutation permanently held.
+        if (!forcedSettlement) {
+          forcedSettlement = setTimeout(() => {
+            settle(child.exitCode, child.signalCode, false);
+          }, 3_500);
+        }
+      };
+
+      const onAbort = () => {
+        if (settled || cancelled) return;
+        cancelled = true;
+        cancellationReason = cancellationSignal?.reason;
+        terminate();
+      };
+
+      child.stdout?.on("data", chunk => { stdout = appendCapped(stdout, chunk); });
+      child.stderr?.on("data", chunk => { stderr = appendCapped(stderr, chunk); });
+      child.on("error", error => {
+        if (settled) return;
+        settled = true;
+        clear();
+        reject(error);
+      });
+      child.on("exit", (code, signal) => {
+        if (settled) return;
+        // Give Node a short window to drain normal stdout/stderr; after that,
+        // inherited grandchildren must not block request completion.
+        exitGrace = setTimeout(() => settle(code, signal, false), 600);
+      });
+      child.on("close", (code, signal) => settle(code, signal, true));
+      cancellationSignal?.addEventListener("abort", onAbort, { once: true });
+
+      timeoutTimer = setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        terminate();
+      }, Math.min(Math.max(timeoutMs, 1_000), 10 * 60_000));
+      if (cancellationSignal?.aborted) onAbort();
     });
     return {
       ...executionResult,
