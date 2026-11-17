@@ -59,7 +59,9 @@ function appendCapped(current: string, next: Buffer | string): string {
 }
 
 function shellBinary(): string {
-  return process.env.SHELL || "/bin/zsh";
+  // Desktop injects SHELL, but standalone Windows runtimes often do not.
+  // Falling back to a Unix-only binary would crash managed process creation.
+  return process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/zsh");
 }
 
 function signalProcessGroup(
@@ -618,7 +620,10 @@ export async function startProcess(
     }
 
     if (!child.pid) {
-      child.kill("SIGKILL");
+      // Node emits ENOENT on a later tick, even when spawn() already
+      // returned without a pid. Prevent an unhandled process error.
+      child.once("error", () => undefined);
+      try { child.kill("SIGKILL"); } catch { /* never started */ }
       throw new Error("Managed process failed to obtain a PID.");
     }
 
