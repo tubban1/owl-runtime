@@ -199,9 +199,12 @@ export function newManagedProcessId(): string {
     .slice(0, 12)}`;
 }
 
-export async function writeManagedProcess(
-  record: ManagedProcessRecord,
-): Promise<void> {
+// A process can terminate while a concurrent status request is reconciling
+// its journal. Windows may reject replacing an open destination with EPERM.
+// Serialize same-process writes and retry only transient rename sharing errors.
+const pendingProcessWrites = new Map<string, Promise<void>>();
+
+async function persistManagedProcess(record: ManagedProcessRecord): Promise<void> {
   await ensureDirs();
   const key = await loadOrCreateKey();
   record.updatedAt = new Date().toISOString();
@@ -212,10 +215,37 @@ export async function writeManagedProcess(
     mode: 0o600,
     flag: "wx",
   });
-  await fs.rename(temp, target);
-  await fs.chmod(target, 0o600).catch(() => undefined);
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await fs.rename(temp, target);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform !== "win32" ||
+            !["EPERM", "EACCES", "EBUSY"].includes(code ?? "") ||
+            attempt >= 7) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 15 * (attempt + 1)));
+      }
+    }
+    await fs.chmod(target, 0o600).catch(() => undefined);
+  } finally {
+    await fs.rm(temp, { force: true }).catch(() => undefined);
+  }
 }
 
+export async function writeManagedProcess(record: ManagedProcessRecord): Promise<void> {
+  const prior = pendingProcessWrites.get(record.processId) ?? Promise.resolve();
+  const current = prior.catch(() => undefined).then(() => persistManagedProcess(record));
+  pendingProcessWrites.set(record.processId, current);
+  try {
+    await current;
+  } finally {
+    if (pendingProcessWrites.get(record.processId) === current) {
+      pendingProcessWrites.delete(record.processId);
+    }
+  }
+}
 export async function readManagedProcess(
   processId: string,
 ): Promise<ManagedProcessRecord> {
