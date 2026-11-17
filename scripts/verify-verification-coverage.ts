@@ -270,6 +270,7 @@ try {
     command: "sleep 30",
     cwd: scratch,
     workspace_mode: "read",
+    include_control_token: true,
   });
   assert.equal(started.observation?.channel, "process");
   assert.equal(started.observation?.state, "running");

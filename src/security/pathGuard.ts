@@ -2,6 +2,7 @@ import { storageLayout } from "../storage/storageFoundation.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 import os from "node:os";
+import { runtimeStatePath } from "../runtime/runtimePaths.js";
 
 export function configuredRoots(): string[] {
   return (process.env.ALLOWED_DIRECTORIES ?? "")
@@ -32,6 +33,27 @@ export function effectiveRoots(): string[] {
 function isWithin(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+// The Runtime's encrypted process records, raw stdout/stderr and key must
+// never become general filesystem-tool data simply because the operator's
+// workspace also contains a Runtime state directory. This does not claim
+// to sandbox explicit shell commands, which have their own permission gate.
+function assertNotRuntimeProcessState(candidate: string): void {
+  const processRoot = path.resolve(
+    process.env.PROCESS_STATE_DIR?.trim() || runtimeStatePath("processes"),
+  );
+  const logRoot = path.resolve(
+    process.env.PROCESS_LOG_DIR?.trim() || path.join(processRoot, "logs"),
+  );
+  const keyPath = path.resolve(
+    process.env.PROCESS_STATE_KEY_PATH?.trim() || runtimeStatePath("process.key"),
+  );
+  if (isWithin(processRoot, candidate) ||
+      isWithin(logRoot, candidate) ||
+      candidate === keyPath) {
+    throw new Error("Access denied: runtime process state is private.");
+  }
 }
 
 async function realConfiguredRoots(): Promise<string[]> {
@@ -69,6 +91,7 @@ export async function assertAllowedExistingPath(inputPath: string): Promise<stri
   }
 
   if (roots.some((root) => isWithin(root, realRequested))) {
+    assertNotRuntimeProcessState(realRequested);
     return realRequested;
   }
 
@@ -106,7 +129,9 @@ export async function assertAllowedTargetPath(inputPath: string): Promise<string
         throw new Error("Access denied: invalid target path.");
       }
 
-      return path.resolve(realAncestor, relativeTail);
+      const target = path.resolve(realAncestor, relativeTail);
+      assertNotRuntimeProcessState(target);
+      return target;
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("Access denied")) throw error;
       const parent = path.dirname(ancestor);

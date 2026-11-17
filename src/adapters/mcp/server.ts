@@ -567,6 +567,7 @@ function createServer() {
       command: z.string().min(1),
       cwd: z.string(),
       workspace_mode: z.enum(["read", "write"]).optional(),
+      include_control_token: z.boolean().optional(),
     },
     {
       title: "Start Process",
@@ -575,7 +576,7 @@ function createServer() {
       idempotentHint: false,
       openWorldHint: true,
     },
-    async ({ command, cwd, workspace_mode }) => {
+    async ({ command, cwd, workspace_mode, include_control_token }) => {
       try {
         return ok(
           (
@@ -583,6 +584,7 @@ function createServer() {
               command,
               cwd,
               workspace_mode: workspace_mode ?? "write",
+              include_control_token: include_control_token === true,
             })
           ).result,
         );
@@ -794,6 +796,8 @@ function createServer() {
     {
       cwd: z.string(),
       message: z.string().min(1),
+      author_name: z.string().min(1).max(120).optional(),
+      author_email: z.string().min(3).max(254).optional(),
     },
     {
       title: "Git Commit",
@@ -802,9 +806,11 @@ function createServer() {
       idempotentHint: false,
       openWorldHint: false,
     },
-    async ({ cwd, message }) => {
+    async ({ cwd, message, author_name, author_email }) => {
       try {
-        return ok((await executeRoutedAction("git.commit", { cwd, message })).result);
+        return ok((await executeRoutedAction("git.commit", {
+          cwd, message, author_name, author_email,
+        })).result);
       } catch (error) {
         return fail(error);
       }

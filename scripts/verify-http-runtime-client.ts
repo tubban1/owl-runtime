@@ -190,6 +190,9 @@ try {
         `${JSON.stringify(process.execPath)} -e ${JSON.stringify("setInterval(() => {}, 1000)")}`,
       cwd: scratch,
       workspace_mode: "read",
+      // This test explicitly exercises bearer-token cross-transport control.
+      // Routine process starts must not include a raw control capability.
+      include_control_token: true,
     },
   })) as any;
 
@@ -261,7 +264,20 @@ try {
   }
   assert.equal(detachedStatus.status, "completed");
   assert.ok(detachedStatus.progress.revision >= detachedStart.progress.revision);
-  await client.deleteTask(detachedTask.id);
+  // Terminal receipt may precede the active-run lease finalizer. Never
+  // force-delete an active task, but require the lease to release promptly.
+  let detachedDeleted = false;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await client.deleteTask(detachedTask.id);
+      detachedDeleted = true;
+      break;
+    } catch (error) {
+      if (!String((error as Error).message).includes("actively running")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  assert.equal(detachedDeleted, true, "Terminal task must release its active-run lease.");
 
   const publicEvents = await client.listEvents({
     afterCursor: "runtime-events:0",
