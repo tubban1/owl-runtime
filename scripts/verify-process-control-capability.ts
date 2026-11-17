@@ -78,15 +78,20 @@ async function cleanup() {
 }
 
 try {
-  const command =
-    `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
-      "process.stdout.write('READY> ');" +
-        "process.stdin.on('data', d => {" +
-        " console.log('GOT:' + d.toString().trim());" +
-        " process.stdout.write('NEXT> ');" +
-        "});" +
-        "setTimeout(() => process.exit(0), 30000);",
-    )}`;
+  // Keep the interactive fixture in a file: PowerShell and POSIX shells
+  // parse nested JS source quoting differently, and this test should measure
+  // process control rather than command-line quoting.
+  const childFile = path.join(scratch, "interactive-process.cjs");
+  await fs.writeFile(
+    childFile,
+    "process.stdout.write('READY> ');" +
+      "process.stdin.on('data', d => {" +
+      " console.log('GOT:' + d.toString().trim());" +
+      " process.stdout.write('NEXT> ');" +
+      "});" +
+      "setTimeout(() => process.exit(0), 30000);",
+  );
+  const command = `node ${JSON.stringify(childFile)}`;
 
   const started = await withExecutionContext(sessionA, async () =>
     await startProcess(command, root, "read"),
