@@ -264,7 +264,20 @@ try {
   }
   assert.equal(detachedStatus.status, "completed");
   assert.ok(detachedStatus.progress.revision >= detachedStart.progress.revision);
-  await client.deleteTask(detachedTask.id);
+  // Terminal receipt may precede the active-run lease finalizer. Never
+  // force-delete an active task, but require the lease to release promptly.
+  let detachedDeleted = false;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await client.deleteTask(detachedTask.id);
+      detachedDeleted = true;
+      break;
+    } catch (error) {
+      if (!String((error as Error).message).includes("actively running")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  assert.equal(detachedDeleted, true, "Terminal task must release its active-run lease.");
 
   const publicEvents = await client.listEvents({
     afterCursor: "runtime-events:0",
