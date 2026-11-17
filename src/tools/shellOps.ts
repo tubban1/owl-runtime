@@ -622,6 +622,31 @@ export async function startProcess(
       throw new Error("Managed process failed to obtain a PID.");
     }
 
+    // A fast child (e.g. "node --version") can exit before the async
+    // journal/lease writes finish. Observe its exit immediately and persist
+    // only after the first durable record exists; otherwise the exit event
+    // is lost and later reconciliation mislabels success as "lost".
+    let observedExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+    let readyToPersistExit = false;
+    const persistObservedExit = () => {
+      if (!readyToPersistExit || !observedExit) return;
+      const { code, signal } = observedExit;
+      void markExited(processId, code, signal).catch(() => undefined);
+    };
+    child.once("exit", (code, signal) => {
+      observedExit = { code, signal };
+      persistObservedExit();
+    });
+    child.once("error", (error) => {
+      void fs
+        .appendFile(
+          logs.stderrPath,
+          `\n[AgentOS process error] ${error.message}\n`,
+          { encoding: "utf8", mode: 0o600 },
+        )
+        .catch(() => undefined);
+    });
+
     const now = new Date().toISOString();
     const record: ManagedProcessRecord = {
       version: 1,
@@ -660,19 +685,8 @@ export async function startProcess(
     }
 
     liveChildren.set(processId, { child });
-
-    child.once("exit", (code, signal) => {
-      void markExited(processId, code, signal).catch(() => undefined);
-    });
-    child.once("error", (error) => {
-      void fs
-        .appendFile(
-          logs.stderrPath,
-          `\n[AgentOS process error] ${error.message}\n`,
-          { encoding: "utf8", mode: 0o600 },
-        )
-        .catch(() => undefined);
-    });
+    readyToPersistExit = true;
+    persistObservedExit();
 
     child.unref();
     const stdinHandle = child.stdin as unknown as { unref?: () => void } | null;
