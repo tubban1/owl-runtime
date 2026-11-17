@@ -190,6 +190,9 @@ try {
         `${JSON.stringify(process.execPath)} -e ${JSON.stringify("setInterval(() => {}, 1000)")}`,
       cwd: scratch,
       workspace_mode: "read",
+      // This test explicitly exercises bearer-token cross-transport control.
+      // Routine process starts must not include a raw control capability.
+      include_control_token: true,
     },
   })) as any;
 
