@@ -133,9 +133,8 @@ function assertProcessOwner(
 ) {
   const context = currentExecutionContext();
   if (processOwnerMatches(record, context, controlToken)) return;
-  throw new Error(
-    `PROCESS_OWNED: ${record.processId} belongs to ${record.ownerTaskId ? `task:${record.ownerTaskId}` : `session:${record.ownerSessionId}`} and cannot be controlled by session:${context.sessionId} without the process control capability.`,
-  );
+  // Do not disclose another session or task identifier in an auth failure.
+  throw new Error("PROCESS_OWNED: process is not accessible to this session without a valid control capability.");
 }
 
 async function ensureLogFile(filePath: string) {
@@ -607,7 +606,10 @@ export async function startProcess(
       child = spawn(shellBinary(), ["-c", command], {
         cwd: safeCwd,
         env: process.env,
-        detached: true,
+        // Windows detached processes cannot reliably inherit redirected file
+        // handles: exit 0 with zero-byte stdout/stderr. Keep the child alive
+        // via the Runtime process journal rather than DETACHED_PROCESS.
+        detached: process.platform !== "win32",
         stdio: ["pipe", stdoutFd, stderrFd],
       });
     } finally {
@@ -717,7 +719,10 @@ export async function listProcesses(options: {
   workspace?: string;
   runningOnly?: boolean;
 } = {}) {
-  const records = await listManagedProcesses();
+  const context = currentExecutionContext();
+  const records = (await listManagedProcesses()).filter((record) =>
+    processOwnerMatches(record, context),
+  );
   const reconciled = await Promise.all(records.map(reconcileRecord));
   const workspace = options.workspace
     ? await resolveWorkspace(options.workspace)
@@ -835,7 +840,11 @@ export async function claimRecoveredProcess(
     controlToken,
   );
 
-  if (!orphanedByRestart && !ownerDisconnected && !capabilityAuthorized) {
+  // A disconnected owner is NOT consent for an unrelated session to take
+  // over its process. Only the original owner or a bearer of its capability
+  // may claim, even when a transport connection went away.
+  const originalOwner = processOwnerMatches(record, currentExecutionContext());
+  if (!capabilityAuthorized && (!originalOwner || (!orphanedByRestart && !ownerDisconnected))) {
     throw new Error(
       "PROCESS_NOT_ORPHANED: claim requires a Runtime-recovered process, a disconnected original transport session, or the process control capability.",
     );
@@ -865,6 +874,7 @@ export async function observeProcess(
   tailChars = 20_000,
 ) {
   const record = await reconcileRecord(await readManagedProcess(processId));
+  assertProcessOwner(record);
   const [stdout, stderr] = await Promise.all([
     readLogTail(record.stdoutPath, tailChars),
     readLogTail(record.stderrPath, tailChars),
@@ -1032,6 +1042,7 @@ export async function getProcessOutput(
   tailChars = 20_000,
 ) {
   const record = await reconcileRecord(await readManagedProcess(processId));
+  assertProcessOwner(record);
   const [stdout, stderr] = await Promise.all([
     readLogTail(record.stdoutPath, tailChars),
     readLogTail(record.stderrPath, tailChars),

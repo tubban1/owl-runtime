@@ -290,11 +290,19 @@ const actions = {
       command: z.string().min(1),
       cwd: z.string(),
       workspace_mode: z.enum(["read", "write"]).optional(),
+      include_control_token: z.boolean().optional(),
     }),
     destructive: true,
     openWorld: true,
-    run: ({ command, cwd, workspace_mode }: any) =>
-      startProcess(command, cwd, workspace_mode ?? "write"),
+    run: async ({ command, cwd, workspace_mode, include_control_token }: any) => {
+      const started = await startProcess(command, cwd, workspace_mode ?? "write");
+      if (include_control_token === true) return started;
+      // Only return the bearer control capability after explicit opt-in;
+      // regular MCP/cloud tool transcripts and telemetry need no raw token.
+      const { controlToken: _capability, stdoutPath: _stdoutPath,
+        stderrPath: _stderrPath, ...safe } = started;
+      return safe;
+    },
   },
   "shell.processes": {
     provider: "shell",
@@ -368,9 +376,18 @@ const actions = {
   "git.commit": {
     provider: "git",
     description: "Create a Git commit.",
-    schema: z.object({ cwd: z.string(), message: z.string().min(1) }),
+    schema: z.object({
+      cwd: z.string(),
+      message: z.string().min(1),
+      author_name: z.string().min(1).max(120).optional(),
+      author_email: z.string().min(3).max(254).optional(),
+    }).refine((a) => Boolean(a.author_name) === Boolean(a.author_email), {
+      message: "Both author_name and author_email must be supplied together.",
+    }),
     destructive: true,
-    run: ({ cwd, message }: any) => gitCommit(cwd, message),
+    run: ({ cwd, message, author_name, author_email }: any) =>
+      gitCommit(cwd, message, author_name && author_email
+        ? { name: author_name, email: author_email } : undefined),
   },
   "git.pull": {
     provider: "git",

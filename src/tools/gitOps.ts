@@ -44,9 +44,28 @@ export async function gitAdd(cwd: string, paths: string[]) {
   return runGit(["add", "--", ...paths], cwd);
 }
 
-export async function gitCommit(cwd: string, message: string) {
+export async function gitCommit(
+  cwd: string,
+  message: string,
+  author?: { name: string; email: string },
+) {
   requireCapability("ALLOW_WRITE", true);
-  return runGit(["commit", "-m", message], cwd);
+  // Git CLI arguments are separated (not shell-interpreted) and -c only
+  // affects this invocation. Never invent a user's real Git identity.
+  if (!author) return runGit(["commit", "-m", message], cwd);
+  const name = author.name.trim();
+  const email = author.email.trim();
+  if (
+    name.length < 1 || name.length > 120 ||
+    /[\r\n<>\x00-\x1f]/.test(name) ||
+    email.length < 3 || email.length > 254 ||
+    /[\r\n<>\s\x00-\x1f]/.test(email) ||
+    !/^[^@]+@[^@]+$/.test(email)
+  ) throw new Error("GIT_AUTHOR_IDENTITY_INVALID");
+  return runGit([
+    "-c", `user.name=${name}`, "-c", `user.email=${email}`,
+    "commit", "-m", message,
+  ], cwd);
 }
 
 export async function gitPull(cwd: string, remote?: string, branch?: string) {
