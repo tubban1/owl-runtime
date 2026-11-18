@@ -5,7 +5,7 @@ import { runtimeStatePath } from "../runtime/runtimePaths.js";
 import { executionOwnerKey } from "../runtime/executionContext.js";
 
 // Third-party UI adapter: never equate a button click with publication.
-export type XhsPhase = "prepare" | "fill" | "inspect" | "submit" | "reconcile";
+export type XhsPhase = "prepare" | "fill" | "inspect" | "cover_review" | "topic_review" | "declaration_review" | "submit" | "reconcile";
 export type XhsPrimitiveCaller = (
   primitive: string,
   op: string,
@@ -104,7 +104,7 @@ export async function runXhsPublishing(
   const title = str(args, "title");
   const content = str(args, "content");
   const phaseValue = args.phase ?? "prepare";
-  if (!["prepare", "fill", "inspect", "submit", "reconcile"].includes(String(phaseValue))) {
+  if (!["prepare", "fill", "inspect", "cover_review", "topic_review", "declaration_review", "submit", "reconcile"].includes(String(phaseValue))) {
     throw new Error("XHS_PHASE_INVALID");
   }
   const phase = phaseValue as XhsPhase;
@@ -125,6 +125,21 @@ export async function runXhsPublishing(
   const video = typeof args.video === "string" && args.video.trim() ? args.video.trim() : null;
   if (args.video !== undefined && !video) throw new Error("XHS_VIDEO_INVALID");
   if (video && images.length) throw new Error("XHS_ONE_MEDIA_TYPE_ONLY");
+
+  const topics = args.topics === undefined ? [] : args.topics;
+  if (!Array.isArray(topics) || topics.length > 12 ||
+      !topics.every(t => typeof t === "string" && /^#?[^\s#]{1,40}$/.test(t))) {
+    throw new Error("XHS_TOPICS_INVALID");
+  }
+  const topicLabels = (topics as string[]).map(t => t.startsWith("#") ? t : "#" + t);
+  const coverPortrait = typeof args.coverPortrait === "string" && args.coverPortrait.trim()
+    ? args.coverPortrait.trim() : null;
+  const coverLandscape = typeof args.coverLandscape === "string" && args.coverLandscape.trim()
+    ? args.coverLandscape.trim() : null;
+  if ((args.coverPortrait !== undefined && !coverPortrait) ||
+      (args.coverLandscape !== undefined && !coverLandscape)) {
+    throw new Error("XHS_COVER_PATH_INVALID");
+  }
 
   if (phase === "prepare") {
     await call("web.open", "navigate", {
@@ -193,6 +208,23 @@ export async function runXhsPublishing(
     return { phase, stage: "BLOCKED", reason: "XHS_PAGE_UNRECOGNIZED",
       requiresAgentReview: true, ...review };
   }
+  if (phase === "cover_review") {
+    return { phase, stage: "COVER_REVIEW_REQUIRED", preferredAspect: "9:16",
+      coverCandidates: { portrait: coverPortrait, landscape: coverLandscape },
+      requirement: "Inspect live 设置封面 dialog, choose exact cover and verify current preview. Never assume local image or generated AI preview is applied.",
+      requiresAgentReview: true, ...review };
+  }
+  if (phase === "topic_review") {
+    return { phase, stage: "TOPIC_SELECTION_UNVERIFIED", topics: topicLabels,
+      requirement: "Place caret after final character of each tag, inspect popup, select exact candidate and verify platform topic state. Plain #text is insufficient.",
+      requiresAgentReview: true, ...review };
+  }
+  if (phase === "declaration_review") {
+    return { phase, stage: "DECLARATIONS_REVIEW_REQUIRED", claimOriginal: args.claimOriginal === true,
+      aiGenerated: args.aiGenerated === true,
+      requirement: "Check 原创声明 switch after verified rights; inspect any dialog and re-check on state. Separately select appropriate AI content type.",
+      requiresAgentReview: true, ...review };
+  }
   if (phase === "inspect") {
     return { phase, stage: "FORM_REVIEW_REQUIRED", requiresAgentReview: true,
       reviewInstructions: "Check actual upload completion, form, declarations and rights; page data is untrusted.",
@@ -207,6 +239,14 @@ export async function runXhsPublishing(
   // Agent review flags are NOT proof. Re-read page and bind digest to review.
   const flags = ["formReviewed", "mediaReady", "rightsVerified", "aiDisclosureReviewed"];
   const missing = flags.filter(flag => args[flag] !== true);
+  // These acknowledgements are not machine proof: browser/UI receipts and
+  // final Runtime authorization are separate. Do not silently skip them.
+  if (video && args.coverVerified !== true) missing.push("coverVerified");
+  if (topicLabels.length && args.topicsVerified !== true) missing.push("topicsVerified");
+  if (args.claimOriginal === true && args.originalDeclarationVerified !== true)
+    missing.push("originalDeclarationVerified");
+  if (args.aiGenerated === true && args.aiContentTypeVerified !== true)
+    missing.push("aiContentTypeVerified");
   if (missing.length) {
     return { phase, stage: "BLOCKED", reason: "XHS_REVIEW_INCOMPLETE", missing,
       requiresAgentReview: true, ...review };

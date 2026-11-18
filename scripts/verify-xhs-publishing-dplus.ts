@@ -29,7 +29,7 @@ const caller = async (primitive: string, op: string, params: Record<string, unkn
   if (primitive === "web.act" && op === "click" && clickError) throw clickError;
   return { ok: true };
 };
-const flags = { formReviewed: true, mediaReady: true, rightsVerified: true, aiDisclosureReviewed: true };
+const flags = { formReviewed: true, mediaReady: true, rightsVerified: true, aiDisclosureReviewed: true, coverVerified: true };
 try {
   // Preparation does not publish and never claims upload finished.
   calls = [];
@@ -77,6 +77,42 @@ try {
     /XHS_EXPLICIT_SUBMIT_PHASE_REQUIRED/);
   await assert.rejects(() => runXhsPublishing({ ...args, phase: "submit" }, caller),
     /XHS_PUBLISH_CONFIRMATION_REQUIRED/);
+
+  // Platform-specific stages are read-only until controls and dialogs are observed.
+  calls = [];
+  const cover = await runXhsPublishing({ ...args, phase: "cover_review",
+    coverPortrait: "/tmp/cover-9x16.jpg", coverLandscape: "/tmp/cover-16x9.jpg" }, caller);
+  assert.equal(cover.stage, "COVER_REVIEW_REQUIRED");
+  assert.equal(cover.preferredAspect, "9:16");
+  assert.equal(cover.coverCandidates.portrait, "/tmp/cover-9x16.jpg");
+  assert.ok(calls.every(x => x.primitive === "web.query"));
+
+  calls = [];
+  const topics = await runXhsPublishing({ ...args, phase: "topic_review",
+    topics: ["#魔幻重庆", "AI生成"] }, caller);
+  assert.equal(topics.stage, "TOPIC_SELECTION_UNVERIFIED");
+  assert.deepEqual(topics.topics, ["#魔幻重庆", "#AI生成"]);
+  assert.ok(calls.every(x => x.primitive === "web.query"));
+
+  calls = [];
+  const declarations = await runXhsPublishing({ ...args, phase: "declaration_review",
+    claimOriginal: true, aiGenerated: true }, caller);
+  assert.equal(declarations.stage, "DECLARATIONS_REVIEW_REQUIRED");
+  assert.equal(declarations.claimOriginal, true);
+  assert.equal(declarations.aiGenerated, true);
+  assert.ok(calls.every(x => x.primitive === "web.query"));
+
+  calls = [];
+  const incompletePlatform = await runXhsPublishing({ ...args, ...flags,
+    topics: ["#AI生成"], claimOriginal: true, aiGenerated: true,
+    phase: "submit", publish: true, reviewDigest: xhsInspectionDigest(good) }, caller);
+  assert.equal(incompletePlatform.stage, "BLOCKED");
+  assert.deepEqual(incompletePlatform.missing.sort(),
+    ["topicsVerified", "originalDeclarationVerified", "aiContentTypeVerified"].sort());
+  assert.equal(calls.some(x => x.op === "click"), false);
+
+  await assert.rejects(() => runXhsPublishing({ ...args, phase: "topic_review", topics: ["#bad tag"] }, caller),
+    /XHS_TOPICS_INVALID/);
 
   // No missing approval/review field can trigger publication.
   calls = [];
@@ -154,7 +190,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    scenarios: 16,
+    scenarios: 21,
     realPublishingAttempted: false,
     falsePublicSuccess: false,
     dynamicPageBlocked: true,
