@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "verify:isa": "OWL_RUNTIME_MODE=test tsx scripts/verify-primitive-isa.ts",
     "verify:skill-abi": "OWL_RUNTIME_MODE=test tsx scripts/verify-skill-abi.ts",
+    "verify:xhs-publishing-dplus": "OWL_RUNTIME_MODE=test tsx scripts/verify-xhs-publishing-dplus.ts",
     "verify:user-skills": "OWL_RUNTIME_MODE=test tsx scripts/verify-user-skill-registry.ts",
     "verify:workflow-discovery": "OWL_RUNTIME_MODE=test tsx scripts/verify-workflow-skill-discovery.ts",
     "verify:public-events": "OWL_RUNTIME_MODE=test tsx scripts/verify-public-event-journal.ts",
