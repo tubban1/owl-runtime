@@ -142,6 +142,7 @@ import {
   executeUserSkill,
   getUserSkillCatalogEntries,
 } from "./userSkillRuntime.js";
+import { runXhsPublishing } from "./xhsPublishingWorkflow.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -439,7 +440,7 @@ const SKILL_RUNTIME_METADATA: Record<string, SkillRuntimeMetadata> = {
     },
   },
   "xhs.publish": {
-    skillVersion: "0.2.0",
+    skillVersion: "0.3.0",
     requiredPrimitiveAbi: 1,
     requiredPrimitives: ["web.open", "web.transfer", "web.act", "web.query"],
     executionMode: "inline",
@@ -3073,130 +3074,41 @@ const skills: SkillDefinition[] = [
     id: "xhs.publish",
     domain: "publishing",
     description:
-      "Prepare or publish a Xiaohongshu web note using the managed browser and local asset upload.",
+      "Prepare, inspect and cautiously submit a Xiaohongshu note; submission click is not proof of publication.",
     keywords: ["xhs", "xiaohongshu", "小红书", "笔记", "publish"],
     contract: BROWSER_PUBLISH_CONTRACT,
     inputs: {
-      title: "Note title.",
-      content: "Note body.",
-      images: "Array of local image paths inside ALLOWED_DIRECTORIES.",
-      publish: "Must be true to click the final publish button; default false.",
-      headless: "Run managed Chrome headlessly; default true.",
+      title: "Title for all publishing phases.",
+      content: "Body for all publishing phases.",
+      images: "Optional image paths, mutually exclusive with video.",
+      video: "Optional local video path; selection is not proof upload completed.",
+      phase: "prepare | fill | inspect | submit | reconcile; default prepare. Upload and form filling are separate phases; submit never navigates/reuploads.",
+      publish: "Only true with phase=submit after fresh page review and Runtime approval.",
+      reviewDigest: "Exact digest returned by phase=inspect, checked against current page.",
+      formReviewed: "Explicit Agent/user review of current form values.",
+      mediaReady: "Explicit Agent/user confirmation of upload completion.",
+      rightsVerified: "Explicit Agent/user confirmation of ownership/rights.",
+      aiDisclosureReviewed: "Explicit Agent/user review of applicable AI-content declaration.",
+      account: "Optional account reference used to bind the submission identity.",
+      submissionKey: "Optional stable logical id; never change it to retry an uncertain submission.",
+      headless: "Run managed Chrome headlessly during prepare; default true.",
     },
     dryRunPlan: (args) => ({
       url: "https://creator.xiaohongshu.com/publish/publish",
+      phase: args.phase ?? "prepare",
       headless: optionalBoolean(args, "headless", true),
-      uploadCount: Array.isArray(args.images) ? args.images.length : 0,
-      finalPublishClick: optionalBoolean(args, "publish", false),
+      uploadCount: Array.isArray(args.images) ? args.images.length : (args.video ? 1 : 0),
+      finalPublishClick: args.phase === "submit" && args.publish === true,
+      successEvidence: "A click is never proof of platform acceptance or public visibility.",
     }),
-    run: async (args) => {
-      const title = requiredText(args, "title");
-      const content = requiredText(args, "content");
-      const images = Array.isArray(args.images)
-        ? args.images.filter((item): item is string => typeof item === "string")
-        : [];
-      const publish = optionalBoolean(args, "publish", false);
-      const headless = optionalBoolean(args, "headless", true);
-
-      return await withSkillResources("xhs.publish", BROWSER_PUBLISH_CONTRACT, async (held) => {
-        await callPrimitive(
-          "web.open",
-          "navigate",
-          {
-            url: "https://creator.xiaohongshu.com/publish/publish",
-            wait_until: "domcontentloaded",
-            headless,
-          },
-          held,
-        );
-        await sleep(1200);
-
-        if (images.length > 0) {
-          await callPrimitive(
-            "web.transfer",
-            "upload",
-            {
-              selector: 'input[type="file"]',
-              files: images,
-            },
-            held,
-          );
-          await sleep(1000);
-        }
-
-        await callPrimitive(
-          "web.act",
-          "type",
-          {
-            selector:
-              'input[placeholder*="标题"], input[placeholder*="title" i], input[type="text"]',
-            text: title,
-          },
-          held,
-        );
-
-        await callPrimitive(
-          "web.act",
-          "type",
-          {
-            selector:
-              'div[contenteditable="true"], textarea[placeholder*="正文"], textarea',
-            text: content,
-          },
-          held,
-        );
-
-        if (!publish) {
-          return {
-            prepared: true,
-            published: false,
-            title,
-            imageCount: images.length,
-            headless,
-            note: "Form prepared but final publish button was not clicked.",
-          };
-        }
-
-        const selectors = [
-          'button:has-text("发布")',
-          'text="发布"',
-          'button:has-text("Publish")',
-          'button:has-text("Veröffentlichen")',
-        ];
-        let lastError = "";
-        let clicked = false;
-        for (const selector of selectors) {
-          try {
-            await callPrimitive("web.act", "click", { selector }, held);
-            clicked = true;
-            break;
-          } catch (error) {
-            lastError = error instanceof Error ? error.message : String(error);
-          }
-        }
-        if (!clicked) {
-          throw new Error(
-            `Could not locate the Xiaohongshu publish button. ${lastError}`,
-          );
-        }
-
-        await sleep(1200);
-        const snapshot = await callPrimitive(
-          "web.query",
-          "snapshot",
-          { max_chars: 6000 },
-          held,
-        );
-        return {
-          prepared: true,
-          published: true,
-          title,
-          imageCount: images.length,
-          headless,
-          snapshot,
-        };
-      });
-    },
+    run: async (args) => await withSkillResources(
+      "xhs.publish",
+      BROWSER_PUBLISH_CONTRACT,
+      async (held) => await runXhsPublishing(
+        args,
+        (primitive, op, parameters) => callPrimitive(primitive, op, parameters, held),
+      ),
+    ),
   },
   {
     id: "email.compose",
